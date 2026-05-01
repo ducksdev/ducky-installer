@@ -8,7 +8,7 @@ Runs anywhere Ubuntu 24.04+ runs.
 On a fresh Ubuntu 24.04+ host:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ducksdev/ducky-pool/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/ducksdev/ducky-installer/main/install.sh | sudo bash
 ```
 
 That's it. The installer:
@@ -70,7 +70,7 @@ sudo docker logs -f ducky-ckpool
 sudo docker logs -f ducky-web
 
 # update (re-run installer; safe and idempotent)
-curl -fsSL https://raw.githubusercontent.com/ducksdev/ducky-pool/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/ducksdev/ducky-installer/main/install.sh | sudo bash
 ```
 
 ## Uninstall
