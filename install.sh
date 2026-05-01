@@ -202,7 +202,7 @@ services:
       STRATUM_PORT: ${STRATUM_PORT}
       PAYOUT_ADDRESS_FILE: /shared/payout.address
       POOL_STATUS_FILE: /pool-logs/pool/pool.status
-      WORKERS_DIR: /pool-logs/workers
+      WORKERS_DIR: /pool-logs/users
     volumes:
       - ${DATA_DIR}/shared:/shared
       # Read pool.status + workers/* and allow removing worker files

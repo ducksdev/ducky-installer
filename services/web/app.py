@@ -47,7 +47,7 @@ BCH_RPC_PASS = os.environ.get("BCH_RPC_PASS", "")
 STRATUM_PORT = int(os.environ.get("STRATUM_PORT", "4567"))
 PAYOUT_FILE = os.environ.get("PAYOUT_ADDRESS_FILE", "/shared/payout.address")
 POOL_STATUS_FILE = os.environ.get("POOL_STATUS_FILE", "/pool-logs/pool/pool.status")
-WORKERS_DIR = os.environ.get("WORKERS_DIR", "/pool-logs/workers")
+WORKERS_DIR = os.environ.get("WORKERS_DIR", "/pool-logs/users")
 FLASK_PORT = int(os.environ.get("FLASK_PORT", "4568"))
 
 STATE_DIR = os.environ.get("STATE_DIR", "/shared")
@@ -86,7 +86,13 @@ WEBHOOK_TIMEOUT = 10
 
 LEGACY_BCH_RE = re.compile(r"^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$")
 CASHADDR_RE = re.compile(r"^(bitcoincash:)?[qp][a-z0-9]{40,}$", re.IGNORECASE)
-WORKER_FILENAME_RE = re.compile(r"^[A-Za-z0-9]+\.[A-Za-z0-9_\-]+$")
+# File on disk in /users is just the Base58 BCH address.
+USER_FILENAME_RE = re.compile(r"^[a-km-zA-HJ-NP-Z1-9]{25,40}$")
+# Synthetic worker ID used in dashboard URLs and baseline keys: <address>.<workername>.
+# Keep this in sync with how ckpool emits "workername" in the user file's `worker` array.
+WORKER_ID_RE = re.compile(r"^[a-km-zA-HJ-NP-Z1-9]{25,40}\.[A-Za-z0-9_\-]+$")
+# Backwards-compat alias so existing call sites still work.
+WORKER_FILENAME_RE = WORKER_ID_RE
 
 DIFF_RE = re.compile(r"^\s*([0-9]+(?:\.[0-9]+)?)\s*([KMGTP]?)\s*$", re.IGNORECASE)
 DIFF_MULTIPLIER = {"": 1, "K": 1e3, "M": 1e6, "G": 1e9, "T": 1e12, "P": 1e15}
@@ -266,24 +272,42 @@ def _save_baselines(data: dict) -> None:
     _atomic_write_json(BASELINE_FILE, data)
 
 
+def _read_worker_current_best(worker_id: str) -> float:
+    """Find a worker's current bestshare by reading its parent user file
+    and locating the matching entry in the `worker` array. Returns 0 if
+    not found (e.g. worker hasn't reported yet)."""
+    if "." not in worker_id:
+        return 0.0
+    address = worker_id.split(".", 1)[0]
+    path = os.path.join(WORKERS_DIR, address)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = _load_json_loose(f.read()) or {}
+    except OSError:
+        return 0.0
+    for w in (data.get("worker") or []):
+        if isinstance(w, dict) and w.get("workername") == worker_id:
+            try:
+                return float(w.get("bestshare", 0) or w.get("bestever", 0) or 0)
+            except (TypeError, ValueError):
+                return 0.0
+    return 0.0
+
+
 def reset_baseline(worker_id: str | None) -> int:
     with _state_lock:
         data = _load_baselines()
         workers = data["workers"]
         targets = list(workers.keys()) if worker_id in (None, "__pool__") else [worker_id]
 
-        current = {}
         for wid in targets:
-            path = os.path.join(WORKERS_DIR, wid)
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    d = _load_json_loose(f.read()) or {}
-                current[wid] = float(d.get("bestshare", 0) or d.get("bestever", 0) or 0)
-            except OSError:
-                current[wid] = workers.get(wid, {}).get("best", 0)
-
-        for wid in targets:
-            workers[wid] = {"best": current.get(wid, 0), "last_sent_ts": 0}
+            current = _read_worker_current_best(wid)
+            if current <= 0:
+                # Fall back to whatever baseline we already have, so the
+                # user doesn't end up with a zeroed baseline that fires a
+                # webhook the moment ANY share comes in.
+                current = float(workers.get(wid, {}).get("best", 0))
+            workers[wid] = {"best": current, "last_sent_ts": 0}
 
         _save_baselines(data)
         return len(targets)
@@ -340,13 +364,15 @@ def get_pool_stats() -> dict:
 
 
 def get_workers() -> list[dict]:
+    """Walk /users/* (one file per BCH address), expand each file's
+    nested `worker` array into one dashboard row per worker."""
     if not os.path.isdir(WORKERS_DIR):
         return []
     now = int(time.time())
     out: list[dict] = []
     for path in glob(os.path.join(WORKERS_DIR, "*")):
         fname = os.path.basename(path)
-        if not WORKER_FILENAME_RE.match(fname):
+        if not USER_FILENAME_RE.match(fname):
             continue
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -356,20 +382,33 @@ def get_workers() -> list[dict]:
         if not data:
             continue
 
-        last = int(data.get("lastshare", 0) or 0)
-        age = (now - last) if last else None
-        out.append({
-            "id": fname,
-            "name": fname.split(".", 1)[1] if "." in fname else fname,
-            "status": worker_status(age),
-            "age_s": age,
-            "age_human": humanise_age(age),
-            "hashrate_1m": data.get("hashrate1m", "—"),
-            "hashrate_1hr": data.get("hashrate1hr", "—"),
-            "hashrate_24hr": data.get("hashrate1d") or data.get("hashrate24hr") or "—",
-            "shares": data.get("shares", 0),
-            "best_share": humanise_diff(data.get("bestshare", 0) or data.get("bestever", 0)),
-        })
+        worker_list = data.get("worker") or []
+        if not isinstance(worker_list, list):
+            continue
+
+        for w in worker_list:
+            if not isinstance(w, dict):
+                continue
+            workername = w.get("workername", "")
+            if not workername or not WORKER_ID_RE.match(workername):
+                continue
+            display = workername.split(".", 1)[1] if "." in workername else workername
+
+            last = int(w.get("lastshare", 0) or 0)
+            age = (now - last) if last else None
+            best = w.get("bestshare", 0) or w.get("bestever", 0) or 0
+            out.append({
+                "id": workername,           # full address.workername; used in form actions
+                "name": display,            # short name for display
+                "status": worker_status(age),
+                "age_s": age,
+                "age_human": humanise_age(age),
+                "hashrate_1m": w.get("hashrate1m", "—"),
+                "hashrate_1hr": w.get("hashrate1hr", "—"),
+                "hashrate_24hr": w.get("hashrate1d") or w.get("hashrate24hr") or "—",
+                "shares": w.get("shares", 0),
+                "best_share": humanise_diff(best),
+            })
 
     rank = {"online": 0, "stale": 1, "offline": 2}
     out.sort(key=lambda w: (rank.get(w["status"], 3), w["age_s"] if w["age_s"] is not None else 1e12))
@@ -663,49 +702,62 @@ def _check_and_fire(now_ts: int) -> None:
 
         for path in glob(os.path.join(WORKERS_DIR, "*")):
             fname = os.path.basename(path)
-            if not WORKER_FILENAME_RE.match(fname):
+            if not USER_FILENAME_RE.match(fname):
                 continue
             try:
                 with open(path, "r", encoding="utf-8") as f:
-                    data = _load_json_loose(f.read()) or {}
+                    user_data = _load_json_loose(f.read()) or {}
             except OSError:
                 continue
-            try:
-                current = float(data.get("bestshare", 0) or data.get("bestever", 0) or 0)
-            except (TypeError, ValueError):
-                continue
-            if current <= 0:
+
+            worker_list = user_data.get("worker") or []
+            if not isinstance(worker_list, list):
                 continue
 
-            entry = workers.get(fname)
-            if entry is None:
-                workers[fname] = {"best": current, "last_sent_ts": 0}
-                changed = True
-                continue
+            for w in worker_list:
+                if not isinstance(w, dict):
+                    continue
+                workername = w.get("workername", "")
+                if not workername or not WORKER_ID_RE.match(workername):
+                    continue
+                try:
+                    current = float(w.get("bestshare", 0) or w.get("bestever", 0) or 0)
+                except (TypeError, ValueError):
+                    continue
+                if current <= 0:
+                    continue
 
-            baseline = float(entry.get("best", 0))
-            last_sent = int(entry.get("last_sent_ts", 0))
+                entry = workers.get(workername)
+                if entry is None:
+                    # First-sight rule: record current best as baseline silently,
+                    # so we don't fire on the historical best the moment we start watching.
+                    workers[workername] = {"best": current, "last_sent_ts": 0}
+                    changed = True
+                    continue
 
-            if current > baseline and (now_ts - last_sent) >= WEBHOOK_MIN_INTERVAL:
-                worker_name = fname.split(".", 1)[1] if "." in fname else fname
-                net_diff = get_network_difficulty()
-                ok, _msg = _post_discord(
-                    content=None,
-                    embeds=[_build_best_share_embed(
-                        worker_name=worker_name,
-                        current=current,
-                        net_diff=net_diff,
-                        ts=now_ts,
-                    )],
-                )
-                workers[fname] = {
-                    "best": current,
-                    "last_sent_ts": now_ts if ok else last_sent,
-                }
-                changed = True
-            elif current > baseline:
-                workers[fname] = {"best": current, "last_sent_ts": last_sent}
-                changed = True
+                baseline = float(entry.get("best", 0))
+                last_sent = int(entry.get("last_sent_ts", 0))
+
+                if current > baseline and (now_ts - last_sent) >= WEBHOOK_MIN_INTERVAL:
+                    display = workername.split(".", 1)[1] if "." in workername else workername
+                    net_diff = get_network_difficulty()
+                    ok, _msg = _post_discord(
+                        content=None,
+                        embeds=[_build_best_share_embed(
+                            worker_name=display,
+                            current=current,
+                            net_diff=net_diff,
+                            ts=now_ts,
+                        )],
+                    )
+                    workers[workername] = {
+                        "best": current,
+                        "last_sent_ts": now_ts if ok else last_sent,
+                    }
+                    changed = True
+                elif current > baseline:
+                    workers[workername] = {"best": current, "last_sent_ts": last_sent}
+                    changed = True
 
         if changed:
             _save_baselines(state)
@@ -946,25 +998,29 @@ def set_payout():
 
 @app.route("/workers/forget", methods=["POST"])
 def forget_worker():
+    """In solo mode, ckpool keeps one file per BCH address with a nested
+    worker array. There's no per-worker file to delete — workers come and
+    go inside that array. So 'forget' here drops just our baseline entry
+    for that workername; the worker disappears from the dashboard until
+    it submits another share (which writes a new entry into the user
+    file's worker array)."""
     name = unquote((request.form.get("name") or request.args.get("name") or "").strip())
-    if not name or not WORKER_FILENAME_RE.match(name):
+    if not name or not WORKER_ID_RE.match(name):
         abort(400, "invalid worker name")
-    target = os.path.join(WORKERS_DIR, name)
-    real_target = os.path.realpath(target)
-    real_dir = os.path.realpath(WORKERS_DIR)
-    if not real_target.startswith(real_dir + os.sep):
-        abort(400, "invalid worker path")
-    try:
-        os.remove(real_target)
-        with _state_lock:
-            state = _load_baselines()
-            if state["workers"].pop(name, None) is not None:
-                _save_baselines(state)
-        flash(f"Forgot worker {name.split('.', 1)[-1]}.", "ok")
-    except FileNotFoundError:
-        flash("Worker already gone.", "ok")
-    except OSError as exc:
-        flash(f"Could not remove worker file: {exc}", "error")
+
+    with _state_lock:
+        state = _load_baselines()
+        had_baseline = state["workers"].pop(name, None) is not None
+        if had_baseline:
+            _save_baselines(state)
+
+    wname = name.split(".", 1)[1] if "." in name else name
+    flash(
+        f"Forgot worker {wname}'s baseline. ckpool still tracks it inside its address's "
+        "user file — it'll reappear on the dashboard if it submits more shares. "
+        "Use 'Wipe all stats' on the pool card if you want to fully reset.",
+        "ok",
+    )
     return redirect(url_for("index"))
 
 
@@ -975,7 +1031,7 @@ def reset_best():
         n = reset_baseline("__pool__")
         flash(f"Best-share baseline reset for all {n} worker(s).", "ok")
     else:
-        if not WORKER_FILENAME_RE.match(name):
+        if not WORKER_ID_RE.match(name):
             abort(400, "invalid worker name")
         reset_baseline(name)
         wname = name.split(".", 1)[1] if "." in name else name
@@ -1000,34 +1056,35 @@ def _safe_remove(path: str, base_dir: str) -> bool:
 
 @app.route("/stats/reset", methods=["POST"])
 def reset_stats():
-    """Hard reset — deletes the ckpool worker file(s) so shares/hashrate/
-    bestshare all go back to zero. ckpool recreates the file on the next
-    submitted share. For the pool-wide variant we also blank pool.status
-    so the pool-level bestshare reads 0; ckpool overwrites it on its next
-    update tick (within ~30s).
+    """Hard reset — deletes ckpool user file(s) so shares/hashrate/bestshare
+    all go back to zero. ckpool recreates the file on the next submitted
+    share. For the pool-wide variant we also blank pool.status so the
+    pool-level bestshare reads 0; ckpool overwrites it on its next update
+    tick (within ~30s).
 
-    The miner stays connected the whole time; nothing in this route stops
-    or restarts ckpool. The cost is just the lost stats history.
+    Per-worker wipe in this layout deletes the worker's parent address
+    user file, which also clears all OTHER workers under the same address.
+    In solo mode that's typically just the one worker so it's fine, but the
+    confirmation dialog warns about it.
+
+    Miners stay connected the whole time; nothing in this route stops or
+    restarts ckpool. The cost is just the lost stats history.
     """
     name = (request.form.get("name") or "").strip()
 
     if name == "__pool__":
-        # Wipe every worker file
-        worker_count = 0
+        user_count = 0
         if os.path.isdir(WORKERS_DIR):
             for path in glob(os.path.join(WORKERS_DIR, "*")):
                 fname = os.path.basename(path)
-                if not WORKER_FILENAME_RE.match(fname):
+                if not USER_FILENAME_RE.match(fname):
                     continue
                 try:
                     if _safe_remove(path, WORKERS_DIR):
-                        worker_count += 1
+                        user_count += 1
                 except (OSError, ValueError) as exc:
                     app.logger.warning("could not remove %s: %s", path, exc)
 
-        # Truncate pool.status so the pool-level bestshare reads 0 until
-        # ckpool's next status write. We truncate rather than delete to
-        # avoid surprising ckpool's file handle.
         pool_status_reset = False
         try:
             if os.path.exists(POOL_STATUS_FILE):
@@ -1037,43 +1094,52 @@ def reset_stats():
         except OSError as exc:
             app.logger.warning("could not truncate pool.status: %s", exc)
 
-        # Drop all baselines so the next share fires a webhook fresh.
         with _state_lock:
             state = _load_baselines()
             state["workers"] = {}
             _save_baselines(state)
 
-        bits = [f"Cleared stats for {worker_count} worker(s)"]
+        bits = [f"Cleared stats for {user_count} address file(s)"]
         if pool_status_reset:
             bits.append("reset pool best")
         bits.append("baselines cleared")
         flash(" · ".join(bits) + ". ckpool will rebuild stats on the next share.", "ok")
 
     else:
-        # Per-worker reset
-        if not WORKER_FILENAME_RE.match(name):
+        if not WORKER_ID_RE.match(name):
             abort(400, "invalid worker name")
-        target = os.path.join(WORKERS_DIR, name)
+        # Wipe is per-user-file in this layout — clears every worker that
+        # mines to the same payout address, not just this one. The
+        # confirmation dialog in the template warns about this.
+        address = name.split(".", 1)[0]
+        target = os.path.join(WORKERS_DIR, address)
         try:
             removed = _safe_remove(target, WORKERS_DIR)
         except (OSError, ValueError) as exc:
             flash(f"Could not reset stats: {exc}", "error")
             return redirect(url_for("index"))
 
-        # Drop just this worker's baseline.
         with _state_lock:
             state = _load_baselines()
-            if state["workers"].pop(name, None) is not None:
+            # Drop baselines for every worker under this address.
+            dropped = [k for k in state["workers"] if k.startswith(address + ".")]
+            for k in dropped:
+                state["workers"].pop(k, None)
+            if dropped:
                 _save_baselines(state)
 
         wname = name.split(".", 1)[1] if "." in name else name
         if removed:
             flash(
-                f"Stats wiped for {wname}. ckpool will rebuild them from the next share.",
+                f"Stats wiped for {wname} (and any siblings under the same address). "
+                "ckpool will rebuild from the next share.",
                 "ok",
             )
         else:
-            flash(f"Worker {wname} had no stats file to wipe (baseline still cleared).", "ok")
+            flash(
+                f"No stats file to wipe for {wname}'s address (baselines still cleared).",
+                "ok",
+            )
 
     return redirect(url_for("index"))
 
