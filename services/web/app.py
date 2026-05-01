@@ -55,6 +55,10 @@ SETTINGS_FILE = os.path.join(STATE_DIR, "settings.json")
 BASELINE_FILE = os.path.join(STATE_DIR, "best_baselines.json")
 SEEN_BLOCKS_FILE = os.path.join(STATE_DIR, "seen_blocks.json")
 HISTORY_DB = os.path.join(STATE_DIR, "history.db")
+# When this file appears, ckpool's entrypoint stops ckpool, removes the
+# marker, and starts ckpool fresh on the next loop iteration. We use this
+# to clear ckpool's in-memory bestshare cache on "Wipe all stats".
+RESTART_MARKER = os.path.join(STATE_DIR, ".restart_ckpool")
 
 # ckpool writes one line per found block here.
 BLOCKS_LOG = os.environ.get("BLOCKS_LOG", "/pool-logs/pool/blocks")
@@ -354,11 +358,42 @@ def _read_worker_current_best(worker_id: str) -> float:
     return 0.0
 
 
+def _discover_workers_from_disk() -> list[str]:
+    """Walk every user file and return all workernames found in their
+    `worker` arrays. Used so a 'Reset all bests' picks up workers we
+    might not have baselines for yet (first run, etc.)."""
+    out: list[str] = []
+    if not os.path.isdir(WORKERS_DIR):
+        return out
+    for path in glob(os.path.join(WORKERS_DIR, "*")):
+        fname = os.path.basename(path)
+        if not USER_FILENAME_RE.match(fname):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = _load_json_loose(f.read()) or {}
+        except OSError:
+            continue
+        for w in (data.get("worker") or []):
+            if isinstance(w, dict):
+                wname = w.get("workername")
+                if wname and WORKER_ID_RE.match(wname):
+                    out.append(wname)
+    return out
+
+
 def reset_baseline(worker_id: str | None) -> int:
     with _state_lock:
         data = _load_baselines()
         workers = data["workers"]
-        targets = list(workers.keys()) if worker_id in (None, "__pool__") else [worker_id]
+
+        if worker_id in (None, "__pool__"):
+            # Union of (workers we already track) + (workers ckpool reports)
+            # so we reset baselines even on first run when nothing has been
+            # tracked yet.
+            targets = list(set(workers.keys()) | set(_discover_workers_from_disk()))
+        else:
+            targets = [worker_id]
 
         for wid in targets:
             current = _read_worker_current_best(wid)
@@ -1090,17 +1125,10 @@ def forget_worker():
 
 @app.route("/best/reset", methods=["POST"])
 def reset_best():
-    name = (request.form.get("name") or "").strip()
-    if name == "__pool__":
-        n = reset_baseline("__pool__")
-        flash(f"Best-share baseline reset for all {n} worker(s).", "ok")
-    else:
-        if not WORKER_ID_RE.match(name):
-            abort(400, "invalid worker name")
-        reset_baseline(name)
-        wname = name.split(".", 1)[1] if "." in name else name
-        flash(f"Reset baseline for {wname}.", "ok")
-    return redirect(url_for("index"))
+    """Legacy endpoint — kept for backward compat with any old bookmarked
+    URLs or saved page states. Forwards to /stats/reset, which is the
+    single canonical reset action now."""
+    return reset_stats()
 
 
 def _safe_remove(path: str, base_dir: str) -> bool:
@@ -1118,21 +1146,35 @@ def _safe_remove(path: str, base_dir: str) -> bool:
         return False
 
 
+def _request_ckpool_restart() -> bool:
+    """Drop the restart marker file. The ckpool entrypoint sees it next
+    loop tick (~5s), kills ckpool, deletes the marker, and restarts ckpool
+    fresh. Used to clear ckpool's in-memory bestshare cache after a wipe.
+    Returns True on success."""
+    try:
+        # Touch creates the file with no content; only its existence matters.
+        with open(RESTART_MARKER, "w", encoding="utf-8") as f:
+            f.write(str(int(time.time())))
+        return True
+    except OSError as exc:
+        app.logger.warning("could not write restart marker: %s", exc)
+        return False
+
+
 @app.route("/stats/reset", methods=["POST"])
 def reset_stats():
-    """Hard reset — deletes ckpool user file(s) so shares/hashrate/bestshare
-    all go back to zero. ckpool recreates the file on the next submitted
-    share. For the pool-wide variant we also blank pool.status so the
-    pool-level bestshare reads 0; ckpool overwrites it on its next update
-    tick (within ~30s).
+    """Hard reset — deletes ckpool user file(s) AND requests a ckpool
+    restart so its in-memory bestshare cache is cleared. Without the
+    restart, ckpool would just rewrite the bestshare it remembers as soon
+    as it next ticks — making "Wipe" feel cosmetic.
 
     Per-worker wipe in this layout deletes the worker's parent address
     user file, which also clears all OTHER workers under the same address.
     In solo mode that's typically just the one worker so it's fine, but the
     confirmation dialog warns about it.
 
-    Miners stay connected the whole time; nothing in this route stops or
-    restarts ckpool. The cost is just the lost stats history.
+    Miners briefly disconnect during the ckpool restart (~10s) and reconnect
+    automatically.
     """
     name = (request.form.get("name") or "").strip()
 
@@ -1163,11 +1205,19 @@ def reset_stats():
             state["workers"] = {}
             _save_baselines(state)
 
+        restart_ok = _request_ckpool_restart()
+
         bits = [f"Cleared stats for {user_count} address file(s)"]
         if pool_status_reset:
             bits.append("reset pool best")
         bits.append("baselines cleared")
-        flash(" · ".join(bits) + ". ckpool will rebuild stats on the next share.", "ok")
+        if restart_ok:
+            bits.append("ckpool restart queued")
+        flash(
+            " · ".join(bits)
+            + ". Miners will reconnect within ~10s; ckpool will rebuild stats from the next share.",
+            "ok",
+        )
 
     else:
         if not WORKER_ID_RE.match(name):
@@ -1191,6 +1241,10 @@ def reset_stats():
                 state["workers"].pop(k, None)
             if dropped:
                 _save_baselines(state)
+
+        # Same reasoning as pool-wide wipe — ckpool's in-memory bestshare
+        # for this address survives a file delete, so request a restart.
+        _request_ckpool_restart()
 
         wname = name.split(".", 1)[1] if "." in name else name
         if removed:
