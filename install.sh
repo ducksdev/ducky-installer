@@ -180,7 +180,12 @@ services:
       PAYOUT_ADDRESS_FILE: /shared/payout.address
       POOL_SIG: "/ducky-pool/"
     volumes:
-      - ${DATA_DIR}/shared:/shared:ro
+      # /shared is rw because ckpool's entrypoint needs to delete the
+      # restart marker file dropped by the web container when the user
+      # clicks Reset stats. Earlier versions had this as :ro which broke
+      # Reset entirely — see git history. Don't change to :ro without
+      # also moving the restart-marker mechanism somewhere else.
+      - ${DATA_DIR}/shared:/shared:rw
       - ${DATA_DIR}/ckpool:/var/log/ckpool
     ports:
       - "${STRATUM_PORT}:${STRATUM_PORT}"
@@ -204,7 +209,7 @@ services:
       POOL_STATUS_FILE: /pool-logs/pool/pool.status
       WORKERS_DIR: /pool-logs/users
     volumes:
-      - ${DATA_DIR}/shared:/shared
+      - ${DATA_DIR}/shared:/shared:rw
       # Read pool.status + workers/* and allow removing worker files
       # so the dashboard's "Forget worker" button can clean them up.
       - ${DATA_DIR}/ckpool:/pool-logs
@@ -255,8 +260,36 @@ build_and_start() {
     ok "Images built"
 
     step "Starting stack"
+    # Compose down first so stale container configs (e.g. an old ckpool
+    # with /shared mounted read-only) don't survive into the new run.
+    # Existing volumes and data are preserved — only the container
+    # configs get rebuilt from the latest docker-compose.yml.
+    if docker compose ps -q 2>/dev/null | grep -q .; then
+        docker compose down
+    fi
     docker compose up -d
     ok "Containers started"
+
+    step "Verifying mount config"
+    # Sanity check: ckpool MUST have /shared mounted read-write. If it
+    # comes up read-only (because someone edited the compose by hand,
+    # or because of a Docker bug), Reset stats and the auto-restart
+    # mechanism break silently. Fail loudly here so the user notices.
+    sleep 2
+    local rw_status
+    rw_status="$(docker inspect ducky-ckpool \
+        --format '{{range .Mounts}}{{if eq .Destination "/shared"}}{{.RW}}{{end}}{{end}}' \
+        2>/dev/null || true)"
+    if [ "$rw_status" = "true" ]; then
+        ok "ckpool /shared is read-write (as required)"
+    else
+        echo
+        c_red "✗ FATAL: ckpool /shared is mounted read-only (or container missing)"
+        echo "  Reset stats and Discord webhooks will not work in this state."
+        echo "  Inspect with: sudo docker inspect ducky-ckpool"
+        echo "  Then re-run install.sh after fixing /opt/ducky-pool/docker-compose.yml"
+        exit 1
+    fi
 }
 
 install_systemd() {
