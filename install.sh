@@ -32,7 +32,7 @@ BCHN_IMAGE="${BCHN_IMAGE:-zquestz/bitcoin-cash-node:latest}"
 
 # Source files served from your repo. The installer can run standalone
 # (downloads everything) or be invoked from a local checkout.
-REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/ducksdev/ducky-pool/main}"
+REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/ducksdev/ducky-installer/main}"
 
 #────────────────────────────── helpers ──────────────────────────────#
 
