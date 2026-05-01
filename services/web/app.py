@@ -556,6 +556,101 @@ def reset_best():
     return redirect(url_for("index"))
 
 
+def _safe_remove(path: str, base_dir: str) -> bool:
+    """Remove a file only if it resolves inside base_dir. Returns True if
+    the file existed and was removed, False if it didn't exist. Raises on
+    other OS errors."""
+    real = os.path.realpath(path)
+    real_base = os.path.realpath(base_dir)
+    if not real.startswith(real_base + os.sep):
+        raise ValueError(f"refusing to remove {path}: outside {base_dir}")
+    try:
+        os.remove(real)
+        return True
+    except FileNotFoundError:
+        return False
+
+
+@app.route("/stats/reset", methods=["POST"])
+def reset_stats():
+    """Hard reset — deletes the ckpool worker file(s) so shares/hashrate/
+    bestshare all go back to zero. ckpool recreates the file on the next
+    submitted share. For the pool-wide variant we also blank pool.status
+    so the pool-level bestshare reads 0; ckpool overwrites it on its next
+    update tick (within ~30s).
+
+    The miner stays connected the whole time; nothing in this route stops
+    or restarts ckpool. The cost is just the lost stats history.
+    """
+    name = (request.form.get("name") or "").strip()
+
+    if name == "__pool__":
+        # Wipe every worker file
+        worker_count = 0
+        if os.path.isdir(WORKERS_DIR):
+            for path in glob(os.path.join(WORKERS_DIR, "*")):
+                fname = os.path.basename(path)
+                if not WORKER_FILENAME_RE.match(fname):
+                    continue
+                try:
+                    if _safe_remove(path, WORKERS_DIR):
+                        worker_count += 1
+                except (OSError, ValueError) as exc:
+                    app.logger.warning("could not remove %s: %s", path, exc)
+
+        # Truncate pool.status so the pool-level bestshare reads 0 until
+        # ckpool's next status write. We truncate rather than delete to
+        # avoid surprising ckpool's file handle.
+        pool_status_reset = False
+        try:
+            if os.path.exists(POOL_STATUS_FILE):
+                with open(POOL_STATUS_FILE, "w", encoding="utf-8") as f:
+                    f.write("")
+                pool_status_reset = True
+        except OSError as exc:
+            app.logger.warning("could not truncate pool.status: %s", exc)
+
+        # Drop all baselines so the next share fires a webhook fresh.
+        with _state_lock:
+            state = _load_baselines()
+            state["workers"] = {}
+            _save_baselines(state)
+
+        bits = [f"Cleared stats for {worker_count} worker(s)"]
+        if pool_status_reset:
+            bits.append("reset pool best")
+        bits.append("baselines cleared")
+        flash(" · ".join(bits) + ". ckpool will rebuild stats on the next share.", "ok")
+
+    else:
+        # Per-worker reset
+        if not WORKER_FILENAME_RE.match(name):
+            abort(400, "invalid worker name")
+        target = os.path.join(WORKERS_DIR, name)
+        try:
+            removed = _safe_remove(target, WORKERS_DIR)
+        except (OSError, ValueError) as exc:
+            flash(f"Could not reset stats: {exc}", "error")
+            return redirect(url_for("index"))
+
+        # Drop just this worker's baseline.
+        with _state_lock:
+            state = _load_baselines()
+            if state["workers"].pop(name, None) is not None:
+                _save_baselines(state)
+
+        wname = name.split(".", 1)[1] if "." in name else name
+        if removed:
+            flash(
+                f"Stats wiped for {wname}. ckpool will rebuild them from the next share.",
+                "ok",
+            )
+        else:
+            flash(f"Worker {wname} had no stats file to wipe (baseline still cleared).", "ok")
+
+    return redirect(url_for("index"))
+
+
 @app.route("/settings", methods=["GET"])
 def settings_page():
     s = load_settings()

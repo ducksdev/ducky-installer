@@ -210,9 +210,14 @@
         <span>Pool stats <span id="pool-pill"></span></span>
         <span class="actions">
           <form method="post" action="{{ url_for('reset_best') }}" style="display: inline;"
-                onsubmit="return confirm('Reset best-share baseline for ALL workers?');">
+                onsubmit="return confirm('Reset best-share baseline for ALL workers?\n\nThis only affects when webhooks fire — share counts and hashrates are preserved.');">
             <input type="hidden" name="name" value="__pool__">
             <button type="submit" class="ghost">Reset all bests</button>
+          </form>
+          <form method="post" action="{{ url_for('reset_stats') }}" style="display: inline;"
+                onsubmit="return confirm('WIPE ALL STATS for every worker?\n\nThis deletes all share counts, hashrates AND best shares. ckpool will rebuild stats from the next share each miner submits. Miners stay connected.\n\nThis cannot be undone.');">
+            <input type="hidden" name="name" value="__pool__">
+            <button type="submit" class="ghost danger">Wipe all stats</button>
           </form>
         </span>
       </h2>
@@ -265,13 +270,18 @@
                   <td>
                     <div class="row-actions">
                       <form method="post" action="{{ url_for('reset_best') }}" style="display: inline;"
-                            onsubmit="return confirm('Reset best-share baseline for {{ w.name }}?');">
+                            onsubmit="return confirm('Reset best-share baseline for {{ w.name }}?\n\nThis only affects when webhooks fire — share count and hashrate are preserved.');">
                         <input type="hidden" name="name" value="{{ w.id }}">
-                        <button type="submit" class="ghost" title="Reset best-share baseline">Reset</button>
+                        <button type="submit" class="ghost" title="Reset best-share baseline only">Reset</button>
+                      </form>
+                      <form method="post" action="{{ url_for('reset_stats') }}" style="display: inline;"
+                            onsubmit="return confirm('WIPE STATS for {{ w.name }}?\n\nThis deletes all share counts, hashrates AND best shares. ckpool will rebuild stats from the next share. Miner stays connected.\n\nThis cannot be undone.');">
+                        <input type="hidden" name="name" value="{{ w.id }}">
+                        <button type="submit" class="ghost danger" title="Delete worker stats file">Wipe</button>
                       </form>
                       {% if w.status == 'offline' %}
                         <form method="post" action="{{ url_for('forget_worker') }}" style="display: inline;"
-                              onsubmit="return confirm('Forget worker {{ w.name }}? This deletes its stats file.');">
+                              onsubmit="return confirm('Forget worker {{ w.name }}? This deletes its stats file and removes it from the dashboard until it reconnects.');">
                           <input type="hidden" name="name" value="{{ w.id }}">
                           <button type="submit" class="ghost danger">Forget</button>
                         </form>
@@ -385,13 +395,18 @@
                  : w.status === 'stale'  ? '<span class="pill warn">Stale</span>'
                  :                          '<span class="pill dim">Offline</span>';
       const reset = `<form method="post" action="/best/reset" style="display: inline;"
-                            onsubmit="return confirm('Reset best-share baseline for ${escapeHtml(w.name)}?');">
+                            onsubmit="return confirm('Reset best-share baseline for ${escapeHtml(w.name)}?\\n\\nThis only affects when webhooks fire — share count and hashrate are preserved.');">
                        <input type="hidden" name="name" value="${escapeHtml(w.id)}">
-                       <button type="submit" class="ghost" title="Reset best-share baseline">Reset</button>
+                       <button type="submit" class="ghost" title="Reset best-share baseline only">Reset</button>
                      </form>`;
+      const wipe = `<form method="post" action="/stats/reset" style="display: inline;"
+                           onsubmit="return confirm('WIPE STATS for ${escapeHtml(w.name)}?\\n\\nThis deletes all share counts, hashrates AND best shares. ckpool will rebuild stats from the next share. Miner stays connected.\\n\\nThis cannot be undone.');">
+                      <input type="hidden" name="name" value="${escapeHtml(w.id)}">
+                      <button type="submit" class="ghost danger" title="Delete worker stats file">Wipe</button>
+                    </form>`;
       const forget = w.status === 'offline'
         ? `<form method="post" action="/workers/forget" style="display: inline;"
-                  onsubmit="return confirm('Forget worker ${escapeHtml(w.name)}? This deletes its stats file.');">
+                  onsubmit="return confirm('Forget worker ${escapeHtml(w.name)}? This deletes its stats file and removes it from the dashboard until it reconnects.');">
              <input type="hidden" name="name" value="${escapeHtml(w.id)}">
              <button type="submit" class="ghost danger">Forget</button>
            </form>` : '';
@@ -402,7 +417,7 @@
         <td class="num hide-sm">${fmtInt(w.shares)}</td>
         <td class="num hide-sm">${fmtDiff(w.best_share)}</td>
         <td class="num">${escapeHtml(humaniseAge(w.age_s))}</td>
-        <td><div class="row-actions">${reset}${forget}</div></td>
+        <td><div class="row-actions">${reset}${wipe}${forget}</div></td>
       </tr>`;
     }).join('');
     return `<table class="miners">
