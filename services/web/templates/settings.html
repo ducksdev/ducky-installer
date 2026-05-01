@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Settings · Ducky Pool</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    :root {
+      --bg: #0c0e13;
+      --panel: #161922;
+      --panel-soft: #11141c;
+      --border: #232735;
+      --fg: #e6e9ef;
+      --muted: #8a92a6;
+      --accent: #f9a825;
+      --accent-deep: #c77800;
+      --success: #4cd964;
+      --warn: #ffaa00;
+      --error: #ff6b6b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      background: var(--bg); color: var(--fg);
+      margin: 0; padding: 2rem;
+      min-height: 100vh;
+    }
+    .wrap { max-width: 760px; margin: 0 auto; }
+    header {
+      display: flex; align-items: center; gap: 0.75rem;
+      margin: 0 0 0.4rem;
+    }
+    header .grow { flex: 1; }
+    header h1 {
+      font-weight: 600; letter-spacing: -0.01em;
+      margin: 0; font-size: 1.65rem;
+    }
+    header h1 .accent { color: var(--accent); }
+    header a.nav {
+      color: var(--muted); text-decoration: none;
+      font-size: 0.85rem; padding: 0.4rem 0.7rem;
+      border: 1px solid var(--border); border-radius: 8px;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    header a.nav:hover { color: var(--accent); border-color: var(--accent); }
+    .lede { color: var(--muted); margin: 0 0 1.5rem; font-size: 0.95rem; }
+    .card {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 12px; padding: 1.1rem 1.35rem; margin-bottom: 0.75rem;
+    }
+    .card h2 {
+      font-size: 0.78rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.08em; color: var(--muted); margin: 0 0 0.85rem;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .field { margin-bottom: 1rem; }
+    .field:last-child { margin-bottom: 0; }
+    .field label {
+      display: block; font-size: 0.8rem; color: var(--muted);
+      margin-bottom: 0.3rem; font-weight: 500;
+    }
+    .field input {
+      width: 100%; padding: 0.55rem 0.75rem;
+      background: var(--panel-soft); color: var(--fg);
+      border: 1px solid var(--border); border-radius: 8px;
+      font-family: ui-monospace, monospace; font-size: 0.88rem;
+    }
+    .field input:focus {
+      outline: none; border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(249,168,37,0.18);
+    }
+    .field-help {
+      font-size: 0.78rem; color: var(--muted);
+      margin-top: 0.3rem;
+    }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.75rem;
+    }
+    @media (max-width: 520px) {
+      body { padding: 1rem; }
+      .grid-3 { grid-template-columns: 1fr; }
+    }
+    button {
+      padding: 0.6rem 1.3rem; border-radius: 8px; border: 0;
+      background: var(--accent); color: #1a1200; font-weight: 600;
+      cursor: pointer; transition: background 0.15s;
+    }
+    button:hover { background: var(--accent-deep); color: #fff; }
+    button.ghost {
+      background: transparent; color: var(--muted);
+      border: 1px solid var(--border); font-weight: 500;
+      padding: 0.4rem 0.8rem; font-size: 0.82rem;
+    }
+    button.ghost:hover {
+      background: rgba(249,168,37,0.08); color: var(--accent);
+      border-color: var(--accent);
+    }
+    .actions-bar {
+      display: flex; gap: 0.5rem; align-items: center;
+      margin-top: 1.25rem;
+    }
+    .flash { padding: 0.7rem 1rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.9rem; }
+    .flash.ok { background: rgba(76,217,100,0.1); color: var(--success); }
+    .flash.error { background: rgba(255,107,107,0.1); color: var(--error); }
+    .pill {
+      display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px;
+      font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .pill.ok    { background: rgba(76,217,100,0.15);  color: var(--success); }
+    .pill.dim   { background: rgba(138,146,166,0.15); color: var(--muted); }
+    .note {
+      background: var(--panel-soft);
+      border-left: 3px solid var(--accent);
+      border-radius: 4px;
+      padding: 0.7rem 0.9rem;
+      font-size: 0.85rem; color: var(--fg);
+      margin-bottom: 1rem;
+    }
+    .note .label {
+      color: var(--accent); font-weight: 600;
+      text-transform: uppercase; font-size: 0.7rem;
+      letter-spacing: 0.06em; margin-right: 0.5rem;
+    }
+    .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+
+    <header>
+      <svg width="36" height="36" viewBox="0 0 64 64" aria-hidden="true">
+        <ellipse cx="38" cy="42" rx="20" ry="14" fill="#f9a825"/>
+        <circle cx="22" cy="26" r="11" fill="#f9a825"/>
+        <path d="M 6 26 L 14 22 L 14 30 Z" fill="#ff6f00"/>
+        <circle cx="20" cy="24" r="1.6" fill="#0c0e13"/>
+        <path d="M 30 28 Q 42 14 56 22 Q 50 26 46 24" fill="none" stroke="#c77800" stroke-width="1.2" opacity="0.4"/>
+      </svg>
+      <h1>Ducky <span class="accent">Pool</span></h1>
+      <span class="grow"></span>
+      <a class="nav" href="{{ url_for('index') }}">← Dashboard</a>
+    </header>
+    <p class="lede">Settings.</p>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}
+        <div class="flash {{ cat }}">{{ msg }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    <div class="note">
+      <span class="label">Note</span>
+      Saving any change to <strong>Stratum difficulty</strong> restarts ckpool.
+      Connected miners drop and reconnect within a few seconds; no shares are lost.
+      Discord changes don't affect ckpool.
+    </div>
+
+    <form method="post" action="{{ url_for('settings_save') }}" autocomplete="off">
+
+      <div class="card">
+        <h2><span>Stratum difficulty</span></h2>
+
+        <div class="grid-3">
+          <div class="field">
+            <label for="mindiff">Minimum</label>
+            <input id="mindiff" name="mindiff" type="text" value="{{ mindiff_h }}" placeholder="1">
+            <div class="field-help">Floor for vardiff. Raise this if your hardware drowns the pool in tiny shares.</div>
+          </div>
+          <div class="field">
+            <label for="startdiff">Start</label>
+            <input id="startdiff" name="startdiff" type="text" value="{{ startdiff_h }}" placeholder="1">
+            <div class="field-help">Difficulty new miners start at on connect. ckpool then adjusts via vardiff.</div>
+          </div>
+          <div class="field">
+            <label for="maxdiff">Maximum</label>
+            <input id="maxdiff" name="maxdiff" type="text" value="{{ maxdiff_h }}" placeholder="0">
+            <div class="field-help">Ceiling for vardiff. <strong>0</strong> means unlimited.</div>
+          </div>
+        </div>
+
+        <p class="field-help" style="margin-top: 0.8rem;">
+          Accepts shorthand: <span class="mono">1</span>, <span class="mono">1000</span>,
+          <span class="mono">1K</span>, <span class="mono">100M</span>, <span class="mono">1G</span>,
+          <span class="mono">2.5T</span>.
+        </p>
+      </div>
+
+      <div class="card">
+        <h2>
+          <span>Discord webhook
+            {% if settings.discord.webhook_url %}<span class="pill ok" style="margin-left: 0.5rem;">Configured</span>
+            {% else %}<span class="pill dim" style="margin-left: 0.5rem;">Off</span>{% endif %}
+          </span>
+        </h2>
+
+        <div class="field">
+          <label for="webhook_url">Webhook URL</label>
+          <input id="webhook_url" name="webhook_url" type="url"
+                 value="{{ settings.discord.webhook_url }}"
+                 placeholder="https://discord.com/api/webhooks/...">
+          <div class="field-help">Leave blank to disable. New best-share notifications fire here when set.</div>
+        </div>
+
+        <div class="field">
+          <label for="username">Bot username</label>
+          <input id="username" name="username" type="text"
+                 value="{{ settings.discord.username }}"
+                 placeholder="Ducky Pool" maxlength="80">
+          <div class="field-help">Name that appears next to webhook messages in Discord.</div>
+        </div>
+
+        <div class="field">
+          <label for="avatar_url">Avatar URL</label>
+          <input id="avatar_url" name="avatar_url" type="url"
+                 value="{{ settings.discord.avatar_url }}"
+                 placeholder="https://example.com/duck.png (optional)">
+          <div class="field-help">Optional. PNG/JPG/GIF, square works best. Leave blank for the Discord default.</div>
+        </div>
+      </div>
+
+      <div class="actions-bar">
+        <button type="submit">Save settings</button>
+        <a href="{{ url_for('index') }}" style="color: var(--muted); text-decoration: none; font-size: 0.85rem;">Cancel</a>
+      </div>
+    </form>
+
+    {% if settings.discord.webhook_url %}
+      <div class="card" style="margin-top: 1.5rem;">
+        <h2><span>Test webhook</span></h2>
+        <p class="field-help" style="margin-bottom: 0.75rem;">
+          Posts a test message with the current username and avatar.
+          Save first if you've changed those above.
+        </p>
+        <form method="post" action="{{ url_for('test_webhook') }}">
+          <button type="submit" class="ghost">Send test message</button>
+        </form>
+      </div>
+    {% endif %}
+
+  </div>
+</body>
+</html>

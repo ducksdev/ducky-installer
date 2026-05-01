@@ -30,11 +30,19 @@
       display: flex; align-items: center; gap: 0.75rem;
       margin: 0 0 0.4rem;
     }
+    header .grow { flex: 1; }
     header h1 {
       font-weight: 600; letter-spacing: -0.01em;
       margin: 0; font-size: 1.65rem;
     }
     header h1 .accent { color: var(--accent); }
+    header a.nav {
+      color: var(--muted); text-decoration: none;
+      font-size: 0.85rem; padding: 0.4rem 0.7rem;
+      border: 1px solid var(--border); border-radius: 8px;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    header a.nav:hover { color: var(--accent); border-color: var(--accent); }
     .lede { color: var(--muted); margin: 0 0 1.5rem; font-size: 0.95rem; }
     .card {
       background: var(--panel); border: 1px solid var(--border);
@@ -43,8 +51,9 @@
     .card h2 {
       font-size: 0.78rem; font-weight: 600; text-transform: uppercase;
       letter-spacing: 0.08em; color: var(--muted); margin: 0 0 0.85rem;
-      display: flex; align-items: center;
+      display: flex; align-items: center; justify-content: space-between;
     }
+    .card h2 .actions { display: flex; gap: 0.4rem; }
     .row { display: flex; justify-content: space-between; padding: 0.4rem 0; }
     .row + .row { border-top: 1px solid var(--border); }
     .row span:first-child { color: var(--muted); }
@@ -55,13 +64,14 @@
       border-radius: 8px; word-break: break-all;
       font-family: ui-monospace, monospace; font-size: 0.85rem;
     }
-    form.inline { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
-    input[type=text] {
+    form.inline { display: flex; gap: 0.5rem; margin-top: 0.75rem; flex-wrap: wrap; }
+    input[type=text], input[type=url] {
       flex: 1; padding: 0.6rem 0.8rem; font-family: ui-monospace, monospace;
       background: var(--panel-soft); color: var(--fg);
       border: 1px solid var(--border); border-radius: 8px;
+      min-width: 0; font-size: 0.85rem;
     }
-    input[type=text]:focus {
+    input[type=text]:focus, input[type=url]:focus {
       outline: none; border-color: var(--accent);
       box-shadow: 0 0 0 3px rgba(249,168,37,0.18);
     }
@@ -69,6 +79,7 @@
       padding: 0.6rem 1.1rem; border-radius: 8px; border: 0;
       background: var(--accent); color: #1a1200; font-weight: 600;
       cursor: pointer; transition: background 0.15s;
+      white-space: nowrap;
     }
     button:hover { background: var(--accent-deep); color: #fff; }
     button.ghost {
@@ -77,6 +88,10 @@
       padding: 0.3rem 0.6rem; font-size: 0.78rem;
     }
     button.ghost:hover {
+      background: rgba(249,168,37,0.08); color: var(--accent);
+      border-color: var(--accent);
+    }
+    button.ghost.danger:hover {
       background: rgba(255,107,107,0.08); color: var(--error);
       border-color: var(--error);
     }
@@ -93,16 +108,10 @@
     .pill.err   { background: rgba(255,107,107,0.15); color: var(--error); }
     .pill.dim   { background: rgba(138,146,166,0.15); color: var(--muted); }
     .help { font-size: 0.82rem; color: var(--muted); margin-top: 0.5rem; }
-    .stats {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 0.6rem;
-    }
+    .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.6rem; }
     .stat {
-      background: var(--panel-soft);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 0.7rem 0.85rem;
+      background: var(--panel-soft); border: 1px solid var(--border);
+      border-radius: 8px; padding: 0.7rem 0.85rem;
     }
     .stat-label {
       font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em;
@@ -111,25 +120,19 @@
     .stat-value {
       font-family: ui-monospace, monospace;
       font-size: 1.2rem; font-weight: 600;
-      margin-top: 0.2rem;
-      color: var(--fg);
+      margin-top: 0.2rem; color: var(--fg);
     }
     .stat-value.accent { color: var(--accent); }
 
-    /* Miners table */
-    .miners {
-      width: 100%; border-collapse: collapse; font-size: 0.88rem;
-    }
+    .miners { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
     .miners th {
       text-align: left; font-weight: 500; color: var(--muted);
       font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em;
-      padding: 0.4rem 0.5rem;
-      border-bottom: 1px solid var(--border);
+      padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border);
     }
     .miners th.num, .miners td.num { text-align: right; }
     .miners td {
-      padding: 0.55rem 0.5rem;
-      border-bottom: 1px solid var(--border);
+      padding: 0.55rem 0.5rem; border-bottom: 1px solid var(--border);
       vertical-align: middle;
     }
     .miners tr:last-child td { border-bottom: 0; }
@@ -137,11 +140,11 @@
     .miners .worker-name { font-family: ui-monospace, monospace; }
     .miners .num { font-family: ui-monospace, monospace; }
     .miners-empty { color: var(--muted); font-size: 0.88rem; padding: 0.5rem 0; }
+    .row-actions { display: flex; gap: 0.3rem; justify-content: flex-end; }
 
     .live-dot {
       display: inline-block; width: 6px; height: 6px; border-radius: 999px;
       background: var(--success); margin-left: 0.5rem;
-      box-shadow: 0 0 0 0 rgba(76,217,100,0.6);
       animation: pulse 2s infinite;
     }
     @keyframes pulse {
@@ -171,6 +174,8 @@
       </svg>
       <h1>Ducky <span class="accent">Pool</span></h1>
       <span id="live-indicator" class="live-dot" title="Live — updates every 10s"></span>
+      <span class="grow"></span>
+      <a class="nav" href="{{ url_for('settings_page') }}" title="Settings">⚙ Settings</a>
     </header>
     <p class="lede">Bitcoin Cash full node + solo Stratum pool.</p>
 
@@ -180,19 +185,14 @@
       {% endfor %}
     {% endwith %}
 
-    <!-- ── Node ──────────────────────────────────────────────────── -->
-    <div class="card" id="card-node">
-      <h2>Node status</h2>
+    <div class="card">
+      <h2><span>Node status</span></h2>
       <div id="node-body">
         {% if status.ok %}
           {% set pct = (status.verification_progress * 100) | round(2) %}
-          <div class="row">
-            <span>Status</span>
-            <span>
-              {% if status.ibd %}<span class="pill warn">Syncing</span>
-              {% else %}<span class="pill ok">Synced</span>{% endif %}
-            </span>
-          </div>
+          <div class="row"><span>Status</span><span>
+            {% if status.ibd %}<span class="pill warn">Syncing</span>{% else %}<span class="pill ok">Synced</span>{% endif %}
+          </span></div>
           <div class="row"><span>Chain</span><span class="mono">{{ status.chain }}</span></div>
           <div class="row"><span>Blocks / headers</span><span class="mono">{{ "{:,}".format(status.blocks) }} / {{ "{:,}".format(status.headers) }}</span></div>
           <div class="row"><span>Progress</span><span class="mono">{{ pct }}%</span></div>
@@ -205,9 +205,17 @@
       </div>
     </div>
 
-    <!-- ── Pool ──────────────────────────────────────────────────── -->
     <div class="card">
-      <h2>Pool stats <span id="pool-pill"></span></h2>
+      <h2>
+        <span>Pool stats <span id="pool-pill"></span></span>
+        <span class="actions">
+          <form method="post" action="{{ url_for('reset_best') }}" style="display: inline;"
+                onsubmit="return confirm('Reset best-share baseline for ALL workers?');">
+            <input type="hidden" name="name" value="__pool__">
+            <button type="submit" class="ghost">Reset all bests</button>
+          </form>
+        </span>
+      </h2>
       <div id="pool-body">
         {% if pool.ok %}
           <div class="stats">
@@ -229,21 +237,16 @@
       </div>
     </div>
 
-    <!-- ── Miners ────────────────────────────────────────────────── -->
     <div class="card">
-      <h2>Miners</h2>
+      <h2><span>Miners</span></h2>
       <div id="miners-body">
         {% if workers %}
           <table class="miners">
             <thead>
               <tr>
-                <th>Worker</th>
-                <th>Status</th>
-                <th class="num">1h hashrate</th>
-                <th class="num hide-sm">Shares</th>
-                <th class="num hide-sm">Best</th>
-                <th class="num">Last seen</th>
-                <th></th>
+                <th>Worker</th><th>Status</th><th class="num">1h hashrate</th>
+                <th class="num hide-sm">Shares</th><th class="num hide-sm">Best</th>
+                <th class="num">Last seen</th><th></th>
               </tr>
             </thead>
             <tbody>
@@ -260,12 +263,20 @@
                   <td class="num hide-sm">{{ w.best_share }}</td>
                   <td class="num">{{ w.age_human }}</td>
                   <td>
-                    {% if w.status == 'offline' %}
-                      <form method="post" action="{{ url_for('forget_worker') }}" style="display: inline;" onsubmit="return confirm('Forget worker {{ w.name }}? This deletes its stats file.');">
+                    <div class="row-actions">
+                      <form method="post" action="{{ url_for('reset_best') }}" style="display: inline;"
+                            onsubmit="return confirm('Reset best-share baseline for {{ w.name }}?');">
                         <input type="hidden" name="name" value="{{ w.id }}">
-                        <button type="submit" class="ghost">Forget</button>
+                        <button type="submit" class="ghost" title="Reset best-share baseline">Reset</button>
                       </form>
-                    {% endif %}
+                      {% if w.status == 'offline' %}
+                        <form method="post" action="{{ url_for('forget_worker') }}" style="display: inline;"
+                              onsubmit="return confirm('Forget worker {{ w.name }}? This deletes its stats file.');">
+                          <input type="hidden" name="name" value="{{ w.id }}">
+                          <button type="submit" class="ghost danger">Forget</button>
+                        </form>
+                      {% endif %}
+                    </div>
                   </td>
                 </tr>
               {% endfor %}
@@ -277,16 +288,14 @@
       </div>
     </div>
 
-    <!-- ── Stratum ───────────────────────────────────────────────── -->
     <div class="card">
-      <h2>Stratum endpoint</h2>
+      <h2><span>Stratum endpoint</span></h2>
       <code class="url">{{ stratum_url }}</code>
       <p class="help">Point your miners here. Strip the <span class="mono">stratum+tcp://</span> prefix if your miner asks for host + port separately.</p>
     </div>
 
-    <!-- ── Payout ────────────────────────────────────────────────── -->
     <div class="card">
-      <h2>Payout address</h2>
+      <h2><span>Payout address</span></h2>
       <div id="payout-current">
         {% if payout %}<code class="url">{{ payout }}</code>
         {% else %}<p class="help">No payout address set yet — ckpool will not start until you save one.</p>{% endif %}
@@ -301,18 +310,11 @@
   </div>
 
   <script>
-  // ── Live polling ─────────────────────────────────────────────────
-  // Polls /api/stats every 10s and updates the dynamic cards in place.
-  // Falls back gracefully — the server-rendered HTML is the source of truth
-  // on first paint and after any failed poll.
-
   const POLL_INTERVAL = 10_000;
   const liveDot = document.getElementById('live-indicator');
 
   function fmtInt(n) { return Number(n || 0).toLocaleString(); }
   function fmtDiff(n) {
-    // Best-share values come pre-formatted as strings ("8.42M") from the server.
-    // Pass through if string; only format if we ever get a raw number.
     if (typeof n === 'string') return n;
     n = Number(n || 0);
     if (n <= 0) return '0';
@@ -320,7 +322,6 @@
     for (const [u, t] of units) if (n >= t) return (n / t).toFixed(2) + u;
     return n.toFixed(2);
   }
-
   function humaniseAge(s) {
     if (s === null || s === undefined) return '—';
     s = Math.floor(s);
@@ -329,7 +330,6 @@
     if (s < 86400) return Math.floor(s / 3600) + 'h ago';
     return Math.floor(s / 86400) + 'd ago';
   }
-
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, c => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -355,16 +355,16 @@
   }
 
   function renderPool(p) {
+    const pillEl = document.getElementById('pool-pill');
     if (!p.ok) {
       let msg = 'Could not read pool status.';
       if (p.reason === 'no-file') msg = 'ckpool has not started yet. Set a payout address below to start it.';
       else if (p.reason === 'empty') msg = 'ckpool is starting up. Stats will appear here in a few seconds.';
       else if (p.error) msg = 'Could not read pool status: ' + p.error;
-      document.getElementById('pool-pill').innerHTML = '<span class="pill dim" style="margin-left: 0.5rem;">Idle</span>';
+      pillEl.innerHTML = '<span class="pill dim" style="margin-left: 0.5rem;">Idle</span>';
       return `<p class="help">${escapeHtml(msg)}</p>`;
     }
-    document.getElementById('pool-pill').innerHTML = p.stale
-      ? '<span class="pill warn" style="margin-left: 0.5rem;">Stale</span>' : '';
+    pillEl.innerHTML = p.stale ? '<span class="pill warn" style="margin-left: 0.5rem;">Stale</span>' : '';
     const ageLine = p.age_s !== null
       ? `<p class="help">Updated ${p.age_s}s ago · 1m ${escapeHtml(String(p.hashrate_1m))} · 24h ${escapeHtml(String(p.hashrate_24hr))}</p>` : '';
     return `
@@ -384,12 +384,17 @@
       const pill = w.status === 'online' ? '<span class="pill ok">Online</span>'
                  : w.status === 'stale'  ? '<span class="pill warn">Stale</span>'
                  :                          '<span class="pill dim">Offline</span>';
+      const reset = `<form method="post" action="/best/reset" style="display: inline;"
+                            onsubmit="return confirm('Reset best-share baseline for ${escapeHtml(w.name)}?');">
+                       <input type="hidden" name="name" value="${escapeHtml(w.id)}">
+                       <button type="submit" class="ghost" title="Reset best-share baseline">Reset</button>
+                     </form>`;
       const forget = w.status === 'offline'
-        ? `<form method="post" action="/workers/forget" style="display: inline;" onsubmit="return confirm('Forget worker ${escapeHtml(w.name)}? This deletes its stats file.');">
+        ? `<form method="post" action="/workers/forget" style="display: inline;"
+                  onsubmit="return confirm('Forget worker ${escapeHtml(w.name)}? This deletes its stats file.');">
              <input type="hidden" name="name" value="${escapeHtml(w.id)}">
-             <button type="submit" class="ghost">Forget</button>
-           </form>`
-        : '';
+             <button type="submit" class="ghost danger">Forget</button>
+           </form>` : '';
       return `<tr class="${w.status}">
         <td class="worker-name">${escapeHtml(w.name)}</td>
         <td>${pill}</td>
@@ -397,7 +402,7 @@
         <td class="num hide-sm">${fmtInt(w.shares)}</td>
         <td class="num hide-sm">${fmtDiff(w.best_share)}</td>
         <td class="num">${escapeHtml(humaniseAge(w.age_s))}</td>
-        <td>${forget}</td>
+        <td><div class="row-actions">${reset}${forget}</div></td>
       </tr>`;
     }).join('');
     return `<table class="miners">
@@ -405,8 +410,7 @@
         <th>Worker</th><th>Status</th><th class="num">1h hashrate</th>
         <th class="num hide-sm">Shares</th><th class="num hide-sm">Best</th>
         <th class="num">Last seen</th><th></th>
-      </tr></thead>
-      <tbody>${rows}</tbody></table>`;
+      </tr></thead><tbody>${rows}</tbody></table>`;
   }
 
   async function poll() {
@@ -424,9 +428,7 @@
       liveDot.title = 'Connection lost: ' + e.message;
     }
   }
-
   setInterval(poll, POLL_INTERVAL);
-  // First poll happens at +10s; the server-rendered HTML covers t=0.
   </script>
 </body>
 </html>
