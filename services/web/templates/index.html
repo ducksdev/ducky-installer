@@ -610,7 +610,7 @@
     document.querySelectorAll('.card[data-card] > header.collapsible').forEach(hdr => {
       hdr.addEventListener('click', e => {
         // Ignore clicks on buttons/forms/links inside the header
-        if (e.target.closest('button, form, a, input')) return;
+        if (e.target.closest('button, a, input, label, .range-toggle')) return;
         const card = hdr.parentElement;
         const id = card.dataset.card;
         const nowCollapsed = !card.classList.contains('collapsed');
