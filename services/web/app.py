@@ -576,8 +576,9 @@ _db_lock = threading.Lock()
 
 
 def _hashrate_str_to_float(s: str | float | int | None) -> float | None:
-    """Parse ckpool-style hashrate strings like '1.74T' to a float in H/s.
-    Returns None if unparseable."""
+    """Parse a hashrate string back to a float in H/s. Handles both the
+    raw ckpool format ('1.74T') and the humanised format from
+    humanise_hashrate ('1.74 TH/s'). Returns None if unparseable."""
     if s is None or s == "—":
         return None
     if isinstance(s, (int, float)):
@@ -585,11 +586,22 @@ def _hashrate_str_to_float(s: str | float | int | None) -> float | None:
     s = str(s).strip()
     if not s or s == "0":
         return 0.0
+    # Strip the unit-rate suffix (case-insensitive). After this, '1.74 TH/s'
+    # becomes '1.74 T', '500 GH/s' becomes '500 G', and raw '1.74T' is
+    # untouched.
+    upper = s.upper()
+    for tail in ("H/S", "H/s", "HZ"):
+        if upper.endswith(tail.upper()):
+            s = s[: -len(tail)].rstrip()
+            upper = s.upper()
+            break
+    if not s:
+        return None
     units = {"K": 1e3, "M": 1e6, "G": 1e9, "T": 1e12, "P": 1e15, "E": 1e18}
     suffix = s[-1].upper()
     if suffix in units:
         try:
-            return float(s[:-1]) * units[suffix]
+            return float(s[:-1].strip()) * units[suffix]
         except ValueError:
             return None
     try:
@@ -1205,12 +1217,31 @@ def reset_stats():
             state["workers"] = {}
             _save_baselines(state)
 
+        # Wipe the hashrate history DB too. Without this, the graph keeps
+        # showing the pre-reset period — often noisy/inflated while vardiff
+        # was still climbing — and the y-axis stays stretched, making fresh
+        # data look like a flat line at the bottom.
+        history_rows_cleared = 0
+        try:
+            with _db_lock:
+                conn = _open_db()
+                try:
+                    cur = conn.execute("DELETE FROM hashrate")
+                    history_rows_cleared = cur.rowcount or 0
+                    conn.commit()
+                finally:
+                    conn.close()
+        except Exception as exc:  # noqa: BLE001
+            app.logger.warning("could not clear history db: %s", exc)
+
         restart_ok = _request_ckpool_restart()
 
         bits = [f"Cleared stats for {user_count} address file(s)"]
         if pool_status_reset:
             bits.append("reset pool best")
         bits.append("baselines cleared")
+        if history_rows_cleared:
+            bits.append(f"history wiped ({history_rows_cleared} samples)")
         if restart_ok:
             bits.append("ckpool restart queued")
         flash(
