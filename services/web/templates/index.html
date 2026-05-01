@@ -493,22 +493,24 @@
         <!-- Node status -->
         <div class="card" data-card="node" data-default-collapsed="true">
           <header class="collapsible">
-            <h2>Node status <span id="node-pill"></span></h2>
+            <h2>Node status
+              <span id="node-pill">
+                {% if status.ok %}
+                  {% if status.ibd %}<span class="pill warn">Syncing</span>{% else %}<span class="pill ok">Synced</span>{% endif %}
+                {% else %}<span class="pill err">Unreachable</span>{% endif %}
+              </span>
+            </h2>
             <span class="chevron">▼</span>
           </header>
           <div class="body">
             <div id="node-body">
               {% if status.ok %}
                 {% set pct = (status.verification_progress * 100) | round(2) %}
-                <div class="row"><span>Status</span><span>
-                  {% if status.ibd %}<span class="pill warn">Syncing</span>{% else %}<span class="pill ok">Synced</span>{% endif %}
-                </span></div>
                 <div class="row"><span>Chain</span><span class="mono">{{ status.chain }}</span></div>
                 <div class="row"><span>Blocks</span><span class="mono">{{ "{:,}".format(status.blocks) }}</span></div>
                 <div class="row"><span>Progress</span><span class="mono">{{ pct }}%</span></div>
                 <div class="row"><span>Peers</span><span class="mono">{{ status.connections }}</span></div>
               {% else %}
-                <div class="row"><span>Status</span><span><span class="pill err">Unreachable</span></span></div>
                 <p class="help">{{ status.error }}</p>
               {% endif %}
             </div>
