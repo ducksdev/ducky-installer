@@ -1,0 +1,20 @@
+{
+    "btcd": [
+        {
+            "url": "${BCH_RPC_HOST}:${BCH_RPC_PORT}",
+            "auth": "${BCH_RPC_USER}",
+            "pass": "${BCH_RPC_PASS}",
+            "notify": true
+        }
+    ],
+    "btcaddress": "${PAYOUT_ADDRESS}",
+    "btcsig": "${POOL_SIG}",
+    "blockpoll": 100,
+    "update_interval": 30,
+    "serverurl": [
+        "0.0.0.0:${STRATUM_PORT}"
+    ],
+    "mindiff": 1,
+    "startdiff": 42,
+    "logdir": "/var/log/ckpool"
+}

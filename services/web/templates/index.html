@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Ducky Pool</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    :root {
+      --bg: #0c0e13;
+      --panel: #161922;
+      --panel-soft: #11141c;
+      --border: #232735;
+      --fg: #e6e9ef;
+      --muted: #8a92a6;
+      --accent: #f9a825;
+      --accent-deep: #c77800;
+      --success: #4cd964;
+      --warn: #ffaa00;
+      --error: #ff6b6b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      background: var(--bg); color: var(--fg);
+      margin: 0; padding: 2rem;
+      min-height: 100vh;
+    }
+    .wrap { max-width: 720px; margin: 0 auto; }
+    header {
+      display: flex; align-items: center; gap: 0.75rem;
+      margin: 0 0 0.4rem;
+    }
+    header svg { flex: 0 0 auto; }
+    header h1 {
+      font-weight: 600; letter-spacing: -0.01em;
+      margin: 0; font-size: 1.65rem;
+    }
+    header h1 .accent { color: var(--accent); }
+    .lede { color: var(--muted); margin: 0 0 1.5rem; font-size: 0.95rem; }
+    .card {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 12px; padding: 1.1rem 1.35rem; margin-bottom: 0.75rem;
+    }
+    .card h2 {
+      font-size: 0.78rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.08em; color: var(--muted); margin: 0 0 0.85rem;
+    }
+    .row { display: flex; justify-content: space-between; padding: 0.4rem 0; }
+    .row + .row { border-top: 1px solid var(--border); }
+    .row span:first-child { color: var(--muted); }
+    .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+    code.url {
+      display: block; padding: 0.6rem 0.8rem;
+      background: var(--panel-soft); border: 1px solid var(--border);
+      border-radius: 8px; word-break: break-all;
+      font-family: ui-monospace, monospace; font-size: 0.85rem;
+    }
+    form { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
+    input[type=text] {
+      flex: 1; padding: 0.6rem 0.8rem; font-family: ui-monospace, monospace;
+      background: var(--panel-soft); color: var(--fg);
+      border: 1px solid var(--border); border-radius: 8px;
+    }
+    input[type=text]:focus {
+      outline: none; border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(249,168,37,0.18);
+    }
+    button {
+      padding: 0.6rem 1.1rem; border-radius: 8px; border: 0;
+      background: var(--accent); color: #1a1200; font-weight: 600;
+      cursor: pointer; transition: background 0.15s;
+    }
+    button:hover { background: var(--accent-deep); color: #fff; }
+    .flash { padding: 0.7rem 1rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.9rem; }
+    .flash.ok { background: rgba(76,217,100,0.1); color: var(--success); }
+    .flash.error { background: rgba(255,107,107,0.1); color: var(--error); }
+    .pill {
+      display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px;
+      font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .pill.ok    { background: rgba(76,217,100,0.15);  color: var(--success); }
+    .pill.warn  { background: rgba(255,170,0,0.15);   color: var(--warn); }
+    .pill.err   { background: rgba(255,107,107,0.15); color: var(--error); }
+    .pill.dim   { background: rgba(138,146,166,0.15); color: var(--muted); }
+    .help { font-size: 0.82rem; color: var(--muted); margin-top: 0.5rem; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.6rem;
+    }
+    .stat {
+      background: var(--panel-soft);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.7rem 0.85rem;
+    }
+    .stat-label {
+      font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+    .stat-value {
+      font-family: ui-monospace, monospace;
+      font-size: 1.2rem; font-weight: 600;
+      margin-top: 0.2rem;
+      color: var(--fg);
+    }
+    .stat-value.accent { color: var(--accent); }
+    @media (max-width: 480px) {
+      body { padding: 1rem; }
+      .stats { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+
+    <header>
+      <svg width="36" height="36" viewBox="0 0 64 64" aria-hidden="true">
+        <ellipse cx="38" cy="42" rx="20" ry="14" fill="#f9a825"/>
+        <circle cx="22" cy="26" r="11" fill="#f9a825"/>
+        <path d="M 6 26 L 14 22 L 14 30 Z" fill="#ff6f00"/>
+        <circle cx="20" cy="24" r="1.6" fill="#0c0e13"/>
+        <path d="M 30 28 Q 42 14 56 22 Q 50 26 46 24" fill="none" stroke="#c77800" stroke-width="1.2" opacity="0.4"/>
+      </svg>
+      <h1>Ducky <span class="accent">Pool</span></h1>
+    </header>
+    <p class="lede">Bitcoin Cash full node + solo Stratum pool.</p>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}
+        <div class="flash {{ cat }}">{{ msg }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    <div class="card">
+      <h2>Node status</h2>
+      {% if status.ok %}
+        {% set pct = (status.verification_progress * 100) | round(2) %}
+        <div class="row">
+          <span>Status</span>
+          <span>
+            {% if status.ibd %}
+              <span class="pill warn">Syncing</span>
+            {% else %}
+              <span class="pill ok">Synced</span>
+            {% endif %}
+          </span>
+        </div>
+        <div class="row"><span>Chain</span><span class="mono">{{ status.chain }}</span></div>
+        <div class="row"><span>Blocks / headers</span><span class="mono">{{ "{:,}".format(status.blocks) }} / {{ "{:,}".format(status.headers) }}</span></div>
+        <div class="row"><span>Progress</span><span class="mono">{{ pct }}%</span></div>
+        <div class="row"><span>Peers</span><span class="mono">{{ status.connections }}</span></div>
+        <div class="row"><span>Version</span><span class="mono">{{ status.version }}</span></div>
+      {% else %}
+        <div class="row">
+          <span>Status</span>
+          <span><span class="pill err">Unreachable</span></span>
+        </div>
+        <p class="help">{{ status.error }}</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Pool stats
+        {% if pool.ok and pool.stale %}
+          <span class="pill warn" style="margin-left: 0.5rem;">Stale</span>
+        {% elif not pool.ok %}
+          <span class="pill dim" style="margin-left: 0.5rem;">Idle</span>
+        {% endif %}
+      </h2>
+      {% if pool.ok %}
+        <div class="stats">
+          <div class="stat">
+            <div class="stat-label">Hashrate (1h)</div>
+            <div class="stat-value accent">{{ pool.hashrate_1hr }}</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Workers</div>
+            <div class="stat-value">{{ pool.workers }} <span style="color: var(--muted); font-size: 0.85rem; font-weight: 400;">/ {{ pool.users }} users</span></div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Accepted shares</div>
+            <div class="stat-value">{{ "{:,}".format(pool.accepted) }}</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Best share</div>
+            <div class="stat-value">{{ "{:,.2f}".format(pool.best_share) }}</div>
+          </div>
+        </div>
+        {% if pool.age_s is not none %}
+          <p class="help">Updated {{ pool.age_s }}s ago · 1m {{ pool.hashrate_1m }} · 24h {{ pool.hashrate_24hr }}</p>
+        {% endif %}
+      {% else %}
+        <p class="help">
+          {% if pool.reason == 'no-file' %}
+            ckpool has not started yet. Set a payout address below to start it.
+          {% elif pool.reason == 'empty' %}
+            ckpool is starting up. Stats will appear here in a few seconds.
+          {% else %}
+            Could not read pool status: {{ pool.error or pool.reason }}
+          {% endif %}
+        </p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Stratum endpoint</h2>
+      <code class="url">{{ stratum_url }}</code>
+      <p class="help">
+        Point your miners here. Strip the <span class="mono">stratum+tcp://</span>
+        prefix if your miner asks for host + port separately.
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>Payout address</h2>
+      {% if payout %}
+        <code class="url">{{ payout }}</code>
+      {% else %}
+        <p class="help">No payout address set yet — ckpool will not start until you save one.</p>
+      {% endif %}
+      <form method="post" action="/payout" autocomplete="off">
+        <input type="text" name="address" placeholder="Legacy (1.../3...) or CashAddr (q.../p...)" required>
+        <button type="submit">Save</button>
+      </form>
+      <p class="help">
+        Both legacy Base58 and CashAddr are accepted. CashAddr is converted to
+        legacy automatically because ckpool needs the legacy form.
+      </p>
+    </div>
+
+  </div>
+</body>
+</html>
