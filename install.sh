@@ -32,7 +32,7 @@ BCHN_IMAGE="${BCHN_IMAGE:-zquestz/bitcoin-cash-node:latest}"
 
 # Source files served from your repo. The installer can run standalone
 # (downloads everything) or be invoked from a local checkout.
-REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/ducksdev/ducky-installer/main}"
+REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/ducksdev/ducky-pool/main}"
 
 #────────────────────────────── helpers ──────────────────────────────#
 
@@ -200,9 +200,12 @@ services:
       STRATUM_PORT: ${STRATUM_PORT}
       PAYOUT_ADDRESS_FILE: /shared/payout.address
       POOL_STATUS_FILE: /pool-logs/pool/pool.status
+      WORKERS_DIR: /pool-logs/workers
     volumes:
       - ${DATA_DIR}/shared:/shared
-      - ${DATA_DIR}/ckpool:/pool-logs:ro
+      # Read pool.status + workers/* and allow removing worker files
+      # so the dashboard's "Forget worker" button can clean them up.
+      - ${DATA_DIR}/ckpool:/pool-logs
     ports:
       - "${WEB_PORT}:${WEB_PORT}"
     depends_on:
@@ -213,18 +216,34 @@ COMPOSE
 }
 
 fetch_app_files() {
-    step "Fetching app files"
-    fetch_or_copy services/web/Dockerfile          "$INSTALL_DIR/services/web/Dockerfile"
-    fetch_or_copy services/web/requirements.txt    "$INSTALL_DIR/services/web/requirements.txt"
-    fetch_or_copy services/web/app.py              "$INSTALL_DIR/services/web/app.py"
-    fetch_or_copy services/web/templates/index.html \
-                                                   "$INSTALL_DIR/services/web/templates/index.html"
-    fetch_or_copy services/ckpool/Dockerfile       "$INSTALL_DIR/services/ckpool/Dockerfile"
-    fetch_or_copy services/ckpool/ckpool.conf.template \
-                                                   "$INSTALL_DIR/services/ckpool/ckpool.conf.template"
-    fetch_or_copy services/ckpool/entrypoint.sh    "$INSTALL_DIR/services/ckpool/entrypoint.sh"
-    chmod +x "$INSTALL_DIR/services/ckpool/entrypoint.sh"
-    ok "App files in place"
+    step "Fetching app files (from manifest)"
+
+    # The manifest is a list of relative paths the installer should pull
+    # from the repo. Adding new files only needs an entry here — no
+    # installer code change.
+    local manifest_path="$INSTALL_DIR/.manifest"
+    fetch_or_copy MANIFEST "$manifest_path" \
+        || die "Could not fetch MANIFEST"
+
+    local count=0
+    while IFS= read -r rel || [ -n "$rel" ]; do
+        # skip blanks and # comments
+        [ -z "$rel" ] && continue
+        case "$rel" in \#*) continue;; esac
+        rel="${rel#"${rel%%[![:space:]]*}"}"   # ltrim
+        rel="${rel%"${rel##*[![:space:]]}"}"   # rtrim
+        [ -z "$rel" ] && continue
+
+        local dest="$INSTALL_DIR/$rel"
+        mkdir -p "$(dirname "$dest")"
+        fetch_or_copy "$rel" "$dest" \
+            || die "Could not fetch $rel"
+        count=$((count + 1))
+    done < "$manifest_path"
+
+    chmod +x "$INSTALL_DIR/services/ckpool/entrypoint.sh" 2>/dev/null || true
+    rm -f "$manifest_path"
+    ok "$count app files in place"
 }
 
 build_and_start() {
