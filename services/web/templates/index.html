@@ -355,7 +355,7 @@
             <div id="pool-body">
               {% if pool.ok %}
                 <div class="stats cols-4">
-                  <div class="stat"><div class="stat-label">Hashrate (1h)</div><div class="stat-value accent">{{ pool.hashrate_1hr }}</div></div>
+                  <div class="stat"><div class="stat-label">Hashrate</div><div class="stat-value accent">{{ pool.hashrate_1m }}</div></div>
                   <div class="stat"><div class="stat-label">Workers</div><div class="stat-value">{{ pool.workers }} <span style="color: var(--muted); font-size: 0.78rem; font-weight: 400;">/ {{ pool.users }}</span></div></div>
                   <div class="stat"><div class="stat-label">Accepted</div><div class="stat-value">{{ "{:,}".format(pool.accepted) }}</div></div>
                   <div class="stat"><div class="stat-label">Best share</div><div class="stat-value">{{ pool.best_share }}</div></div>
@@ -364,7 +364,7 @@
                   <p class="help">Block ETA at current hashrate: <span class="mono">{{ eta.human }}</span> · <span class="mono">{{ eta.per_year_human }}</span></p>
                 {% endif %}
                 {% if pool.age_s is not none %}
-                  <p class="help">Updated {{ pool.age_s }}s ago · 1m {{ pool.hashrate_1m }} · 24h {{ pool.hashrate_24hr }}</p>
+                  <p class="help">Updated {{ pool.age_s }}s ago · 1h {{ pool.hashrate_1hr }} · 24h {{ pool.hashrate_24hr }}</p>
                 {% endif %}
               {% else %}
                 <p class="help">
@@ -410,7 +410,7 @@
                 <table class="miners">
                   <thead>
                     <tr>
-                      <th>Worker</th><th>Status</th><th class="num">1h hashrate</th>
+                      <th>Worker</th><th>Status</th><th class="num">Hashrate</th>
                       <th class="num">Shares</th><th class="num">Best</th>
                       <th class="num">Last seen</th>
                       {% if not public %}<th></th>{% endif %}
@@ -425,7 +425,7 @@
                           {% elif w.status == 'stale' %}<span class="pill warn">Stale</span>
                           {% else %}<span class="pill dim">Offline</span>{% endif %}
                         </td>
-                        <td class="num">{{ w.hashrate_1hr }}</td>
+                        <td class="num">{{ w.hashrate_1m }}</td>
                         <td class="num">{{ "{:,}".format(w.shares) }}</td>
                         <td class="num">{{ w.best_share }}</td>
                         <td class="num">{{ w.age_human }}</td>
@@ -462,7 +462,7 @@
                         {% else %}<span class="pill dim">Offline</span>{% endif %}
                       </div>
                       <div class="stats-row">
-                        <div>1h<br><span class="v">{{ w.hashrate_1hr }}</span></div>
+                        <div>Hashrate<br><span class="v">{{ w.hashrate_1m }}</span></div>
                         <div>Best<br><span class="v">{{ w.best_share }}</span></div>
                         <div>Seen<br><span class="v">{{ w.age_human }}</span></div>
                       </div>
@@ -676,10 +676,10 @@
     const etaLine = (eta && eta.ok)
       ? `<p class="help">Block ETA at current hashrate: <span class="mono">${escapeHtml(eta.human)}</span> · <span class="mono">${escapeHtml(eta.per_year_human)}</span></p>` : '';
     const ageLine = p.age_s !== null
-      ? `<p class="help">Updated ${p.age_s}s ago · 1m ${escapeHtml(String(p.hashrate_1m))} · 24h ${escapeHtml(String(p.hashrate_24hr))}</p>` : '';
+      ? `<p class="help">Updated ${p.age_s}s ago · 1h ${escapeHtml(String(p.hashrate_1hr))} · 24h ${escapeHtml(String(p.hashrate_24hr))}</p>` : '';
     return `
       <div class="stats cols-4">
-        <div class="stat"><div class="stat-label">Hashrate (1h)</div><div class="stat-value accent">${escapeHtml(String(p.hashrate_1hr))}</div></div>
+        <div class="stat"><div class="stat-label">Hashrate</div><div class="stat-value accent">${escapeHtml(String(p.hashrate_1m))}</div></div>
         <div class="stat"><div class="stat-label">Workers</div><div class="stat-value">${p.workers} <span style="color: var(--muted); font-size: 0.78rem; font-weight: 400;">/ ${p.users}</span></div></div>
         <div class="stat"><div class="stat-label">Accepted</div><div class="stat-value">${fmtInt(p.accepted)}</div></div>
         <div class="stat"><div class="stat-label">Best share</div><div class="stat-value">${fmtDiff(p.best_share)}</div></div>
@@ -735,7 +735,7 @@
       return `<tr class="${w.status}">
         <td class="worker-name">${escapeHtml(w.name)}</td>
         <td>${pill}</td>
-        <td class="num">${escapeHtml(String(w.hashrate_1hr))}</td>
+        <td class="num">${escapeHtml(String(w.hashrate_1m))}</td>
         <td class="num">${fmtInt(w.shares)}</td>
         <td class="num">${fmtDiff(w.best_share)}</td>
         <td class="num">${escapeHtml(humaniseAge(w.age_s))}</td>
@@ -745,7 +745,7 @@
     const adminCol = PUBLIC_VIEW ? '' : '<th></th>';
     const table = `<table class="miners">
       <thead><tr>
-        <th>Worker</th><th>Status</th><th class="num">1h hashrate</th>
+        <th>Worker</th><th>Status</th><th class="num">Hashrate</th>
         <th class="num">Shares</th><th class="num">Best</th>
         <th class="num">Last seen</th>${adminCol}
       </tr></thead><tbody>${rows}</tbody></table>`;
@@ -763,7 +763,7 @@
           ${pill}
         </div>
         <div class="stats-row">
-          <div>1h<span class="v">${escapeHtml(String(w.hashrate_1hr))}</span></div>
+          <div>Hashrate<span class="v">${escapeHtml(String(w.hashrate_1m))}</span></div>
           <div>Best<span class="v">${fmtDiff(w.best_share)}</span></div>
           <div>Seen<span class="v">${escapeHtml(humaniseAge(w.age_s))}</span></div>
         </div>
