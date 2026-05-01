@@ -9,6 +9,7 @@
   <style>
     :root {
       --bg: #0c0e13;
+      --bg-alpha: rgba(12, 14, 19, 0.92);
       --panel: #161922;
       --panel-soft: #11141c;
       --border: #232735;
@@ -21,58 +22,110 @@
       --error: #ff6b6b;
     }
     * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
       background: var(--bg); color: var(--fg);
-      margin: 0; padding: 2rem;
       min-height: 100vh;
     }
-    .wrap { max-width: 760px; margin: 0 auto; }
-    header {
+
+    /* ── header (sticky) ───────────────────────────────────────── */
+    header.app-header {
+      position: sticky; top: 0; z-index: 50;
+      background: var(--bg-alpha);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    header.app-header .inner {
+      max-width: 1280px; margin: 0 auto;
+      padding: 0.85rem 1.5rem;
       display: flex; align-items: center; gap: 0.75rem;
-      margin: 0 0 0.4rem;
     }
-    header .grow { flex: 1; }
-    header h1 {
-      font-weight: 600; letter-spacing: -0.01em;
-      margin: 0; font-size: 1.65rem;
-    }
-    header h1 .accent { color: var(--accent); }
-    header a.nav {
+    header.app-header h1 { font-weight: 600; letter-spacing: -0.01em; margin: 0; font-size: 1.4rem; }
+    header.app-header h1 .accent { color: var(--accent); }
+    header.app-header .grow { flex: 1; }
+    header.app-header a.nav {
       color: var(--muted); text-decoration: none;
-      font-size: 0.85rem; padding: 0.4rem 0.7rem;
+      font-size: 0.82rem; padding: 0.35rem 0.65rem;
       border: 1px solid var(--border); border-radius: 8px;
       transition: border-color 0.15s, color 0.15s;
+      white-space: nowrap;
     }
-    header a.nav:hover { color: var(--accent); border-color: var(--accent); }
-    .lede { color: var(--muted); margin: 0 0 1.5rem; font-size: 0.95rem; }
+    header.app-header a.nav:hover { color: var(--accent); border-color: var(--accent); }
+
+    /* ── layout ────────────────────────────────────────────────── */
+    .wrap {
+      max-width: 760px; margin: 0 auto;
+      padding: 1.25rem 1.5rem 3rem;
+    }
+    .lede { color: var(--muted); margin: 0 0 1rem; font-size: 0.92rem; }
+    @media (max-width: 640px) {
+      header.app-header .inner { padding: 0.75rem 1rem; }
+      header.app-header h1 { font-size: 1.2rem; }
+      .wrap { padding: 1rem 1rem 2rem; }
+    }
+
+    /* ── card ──────────────────────────────────────────────────── */
     .card {
       background: var(--panel); border: 1px solid var(--border);
-      border-radius: 12px; padding: 1.1rem 1.35rem; margin-bottom: 0.75rem;
+      border-radius: 12px;
+      overflow: hidden;
+      margin-bottom: 0.85rem;
     }
-    .card h2 {
-      font-size: 0.78rem; font-weight: 600; text-transform: uppercase;
-      letter-spacing: 0.08em; color: var(--muted); margin: 0 0 0.85rem;
+    .card > header {
+      padding: 0.85rem 1.1rem;
       display: flex; align-items: center; justify-content: space-between;
+      gap: 0.5rem;
     }
-    .field { margin-bottom: 1rem; }
+    .card > header.collapsible {
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.1s;
+    }
+    .card > header.collapsible:hover { background: rgba(255,255,255,0.02); }
+    .card > header h2 {
+      font-size: 0.74rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.08em; color: var(--muted); margin: 0;
+      display: flex; align-items: center; gap: 0.5rem;
+    }
+    .card > header .chevron {
+      color: var(--muted); font-size: 0.85rem;
+      transition: transform 0.2s;
+      display: inline-block;
+      margin-left: 0.4rem;
+    }
+    .card.collapsed > header .chevron { transform: rotate(-90deg); }
+    .card .body {
+      padding: 0 1.1rem 1.05rem;
+      max-height: 4000px;
+      transition: max-height 0.25s ease, padding 0.2s ease, opacity 0.15s ease;
+      overflow: hidden;
+    }
+    .card.collapsed .body {
+      max-height: 0; padding-top: 0; padding-bottom: 0;
+      opacity: 0;
+    }
+
+    /* ── form fields ───────────────────────────────────────────── */
+    .field { margin-bottom: 0.9rem; }
     .field:last-child { margin-bottom: 0; }
     .field label {
-      display: block; font-size: 0.8rem; color: var(--muted);
+      display: block; font-size: 0.78rem; color: var(--muted);
       margin-bottom: 0.3rem; font-weight: 500;
     }
     .field input {
-      width: 100%; padding: 0.55rem 0.75rem;
+      width: 100%; padding: 0.5rem 0.75rem;
       background: var(--panel-soft); color: var(--fg);
       border: 1px solid var(--border); border-radius: 8px;
-      font-family: ui-monospace, monospace; font-size: 0.88rem;
+      font-family: ui-monospace, monospace; font-size: 0.86rem;
     }
     .field input:focus {
       outline: none; border-color: var(--accent);
       box-shadow: 0 0 0 3px rgba(249,168,37,0.18);
     }
     .field-help {
-      font-size: 0.78rem; color: var(--muted);
+      font-size: 0.76rem; color: var(--muted);
       margin-top: 0.3rem;
     }
     .grid-3 {
@@ -80,35 +133,41 @@
       grid-template-columns: repeat(3, 1fr);
       gap: 0.75rem;
     }
-    @media (max-width: 520px) {
-      body { padding: 1rem; }
-      .grid-3 { grid-template-columns: 1fr; }
-    }
+    @media (max-width: 520px) { .grid-3 { grid-template-columns: 1fr; } }
+
+    /* ── buttons ───────────────────────────────────────────────── */
     button {
-      padding: 0.6rem 1.3rem; border-radius: 8px; border: 0;
+      padding: 0.55rem 1.2rem; border-radius: 8px; border: 0;
       background: var(--accent); color: #1a1200; font-weight: 600;
       cursor: pointer; transition: background 0.15s;
+      font-size: 0.85rem;
     }
     button:hover { background: var(--accent-deep); color: #fff; }
     button.ghost {
       background: transparent; color: var(--muted);
       border: 1px solid var(--border); font-weight: 500;
-      padding: 0.4rem 0.8rem; font-size: 0.82rem;
+      padding: 0.4rem 0.8rem; font-size: 0.8rem;
     }
     button.ghost:hover {
       background: rgba(249,168,37,0.08); color: var(--accent);
       border-color: var(--accent);
     }
     .actions-bar {
-      display: flex; gap: 0.5rem; align-items: center;
-      margin-top: 1.25rem;
+      display: flex; gap: 0.75rem; align-items: center;
+      margin-top: 1rem;
     }
-    .flash { padding: 0.7rem 1rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.9rem; }
-    .flash.ok { background: rgba(76,217,100,0.1); color: var(--success); }
+    .actions-bar a {
+      color: var(--muted); text-decoration: none; font-size: 0.85rem;
+    }
+    .actions-bar a:hover { color: var(--accent); }
+
+    /* ── flashes / pills / notes ───────────────────────────────── */
+    .flash { padding: 0.65rem 0.9rem; border-radius: 8px; margin-bottom: 0.85rem; font-size: 0.88rem; }
+    .flash.ok    { background: rgba(76,217,100,0.1);  color: var(--success); }
     .flash.error { background: rgba(255,107,107,0.1); color: var(--error); }
     .pill {
-      display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px;
-      font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+      display: inline-block; padding: 0.13rem 0.55rem; border-radius: 999px;
+      font-size: 0.68rem; font-weight: 600; text-transform: uppercase;
       letter-spacing: 0.04em;
     }
     .pill.ok    { background: rgba(76,217,100,0.15);  color: var(--success); }
@@ -117,23 +176,29 @@
       background: var(--panel-soft);
       border-left: 3px solid var(--accent);
       border-radius: 4px;
-      padding: 0.7rem 0.9rem;
-      font-size: 0.85rem; color: var(--fg);
-      margin-bottom: 1rem;
+      padding: 0.65rem 0.85rem;
+      font-size: 0.84rem; color: var(--fg);
+      margin-bottom: 0.85rem;
     }
     .note .label {
       color: var(--accent); font-weight: 600;
-      text-transform: uppercase; font-size: 0.7rem;
+      text-transform: uppercase; font-size: 0.66rem;
       letter-spacing: 0.06em; margin-right: 0.5rem;
     }
     .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+    /* ── live dot kept consistent with index ───────────────────── */
+    .live-dot {
+      display: inline-block; width: 6px; height: 6px; border-radius: 999px;
+      background: var(--success); margin-left: 0.4rem;
+    }
   </style>
 </head>
 <body>
-  <div class="wrap">
 
-    <header>
-      <svg width="36" height="36" viewBox="0 0 64 64" aria-hidden="true">
+  <header class="app-header">
+    <div class="inner">
+      <svg width="30" height="30" viewBox="0 0 64 64" aria-hidden="true">
         <ellipse cx="38" cy="42" rx="20" ry="14" fill="#f9a825"/>
         <circle cx="22" cy="26" r="11" fill="#f9a825"/>
         <path d="M 6 26 L 14 22 L 14 30 Z" fill="#ff6f00"/>
@@ -143,7 +208,10 @@
       <h1>Ducky <span class="accent">Pool</span></h1>
       <span class="grow"></span>
       <a class="nav" href="{{ url_for('index') }}">← Dashboard</a>
-    </header>
+    </div>
+  </header>
+
+  <div class="wrap">
     <p class="lede">Settings.</p>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
@@ -161,86 +229,130 @@
 
     <form method="post" action="{{ url_for('settings_save') }}" autocomplete="off">
 
-      <div class="card">
-        <h2><span>Stratum difficulty</span></h2>
-
-        <div class="grid-3">
-          <div class="field">
-            <label for="mindiff">Minimum</label>
-            <input id="mindiff" name="mindiff" type="text" value="{{ mindiff_h }}" placeholder="1">
-            <div class="field-help">Floor for vardiff. Raise this if your hardware drowns the pool in tiny shares.</div>
+      <!-- Stratum difficulty (default collapsed — set once, ignore) -->
+      <div class="card" data-card="stratum-diff" data-default-collapsed="true">
+        <header class="collapsible">
+          <h2>Stratum difficulty</h2>
+          <span class="chevron">▼</span>
+        </header>
+        <div class="body">
+          <div class="grid-3">
+            <div class="field">
+              <label for="mindiff">Minimum</label>
+              <input id="mindiff" name="mindiff" type="text" value="{{ mindiff_h }}" placeholder="1">
+              <div class="field-help">Floor for vardiff. Raise this if hardware drowns the pool in tiny shares.</div>
+            </div>
+            <div class="field">
+              <label for="startdiff">Start</label>
+              <input id="startdiff" name="startdiff" type="text" value="{{ startdiff_h }}" placeholder="1">
+              <div class="field-help">Difficulty new miners start at on connect. ckpool then adjusts via vardiff.</div>
+            </div>
+            <div class="field">
+              <label for="maxdiff">Maximum</label>
+              <input id="maxdiff" name="maxdiff" type="text" value="{{ maxdiff_h }}" placeholder="0">
+              <div class="field-help">Ceiling for vardiff. <strong>0</strong> means unlimited.</div>
+            </div>
           </div>
-          <div class="field">
-            <label for="startdiff">Start</label>
-            <input id="startdiff" name="startdiff" type="text" value="{{ startdiff_h }}" placeholder="1">
-            <div class="field-help">Difficulty new miners start at on connect. ckpool then adjusts via vardiff.</div>
-          </div>
-          <div class="field">
-            <label for="maxdiff">Maximum</label>
-            <input id="maxdiff" name="maxdiff" type="text" value="{{ maxdiff_h }}" placeholder="0">
-            <div class="field-help">Ceiling for vardiff. <strong>0</strong> means unlimited.</div>
-          </div>
+          <p class="field-help" style="margin-top: 0.7rem;">
+            Accepts shorthand: <span class="mono">1</span>, <span class="mono">1000</span>,
+            <span class="mono">1K</span>, <span class="mono">100M</span>, <span class="mono">1G</span>,
+            <span class="mono">2.5T</span>.
+          </p>
         </div>
-
-        <p class="field-help" style="margin-top: 0.8rem;">
-          Accepts shorthand: <span class="mono">1</span>, <span class="mono">1000</span>,
-          <span class="mono">1K</span>, <span class="mono">100M</span>, <span class="mono">1G</span>,
-          <span class="mono">2.5T</span>.
-        </p>
       </div>
 
-      <div class="card">
-        <h2>
-          <span>Discord webhook
-            {% if settings.discord.webhook_url %}<span class="pill ok" style="margin-left: 0.5rem;">Configured</span>
-            {% else %}<span class="pill dim" style="margin-left: 0.5rem;">Off</span>{% endif %}
-          </span>
-        </h2>
-
-        <div class="field">
-          <label for="webhook_url">Webhook URL</label>
-          <input id="webhook_url" name="webhook_url" type="url"
-                 value="{{ settings.discord.webhook_url }}"
-                 placeholder="https://discord.com/api/webhooks/...">
-          <div class="field-help">Leave blank to disable. New best-share notifications fire here when set.</div>
-        </div>
-
-        <div class="field">
-          <label for="username">Bot username</label>
-          <input id="username" name="username" type="text"
-                 value="{{ settings.discord.username }}"
-                 placeholder="Ducky Pool" maxlength="80">
-          <div class="field-help">Name that appears next to webhook messages in Discord.</div>
-        </div>
-
-        <div class="field">
-          <label for="avatar_url">Avatar URL</label>
-          <input id="avatar_url" name="avatar_url" type="url"
-                 value="{{ settings.discord.avatar_url }}"
-                 placeholder="https://example.com/duck.png (optional)">
-          <div class="field-help">Optional. PNG/JPG/GIF, square works best. Leave blank for the Discord default.</div>
+      <!-- Discord (default expanded — most edited section) -->
+      <div class="card" data-card="discord">
+        <header class="collapsible">
+          <h2>Discord webhook
+            {% if settings.discord.webhook_url %}<span class="pill ok">Configured</span>
+            {% else %}<span class="pill dim">Off</span>{% endif %}
+          </h2>
+          <span class="chevron">▼</span>
+        </header>
+        <div class="body">
+          <div class="field">
+            <label for="webhook_url">Webhook URL</label>
+            <input id="webhook_url" name="webhook_url" type="url"
+                   value="{{ settings.discord.webhook_url }}"
+                   placeholder="https://discord.com/api/webhooks/...">
+            <div class="field-help">Leave blank to disable. New best-share notifications fire here when set.</div>
+          </div>
+          <div class="field">
+            <label for="username">Bot username</label>
+            <input id="username" name="username" type="text"
+                   value="{{ settings.discord.username }}"
+                   placeholder="Ducky Pool" maxlength="80">
+            <div class="field-help">Name that appears next to webhook messages in Discord.</div>
+          </div>
+          <div class="field">
+            <label for="avatar_url">Avatar URL</label>
+            <input id="avatar_url" name="avatar_url" type="url"
+                   value="{{ settings.discord.avatar_url }}"
+                   placeholder="https://example.com/duck.png (optional)">
+            <div class="field-help">Optional. PNG/JPG/GIF, square works best. Leave blank for the Discord default.</div>
+          </div>
         </div>
       </div>
 
       <div class="actions-bar">
         <button type="submit">Save settings</button>
-        <a href="{{ url_for('index') }}" style="color: var(--muted); text-decoration: none; font-size: 0.85rem;">Cancel</a>
+        <a href="{{ url_for('index') }}">Cancel</a>
       </div>
     </form>
 
     {% if settings.discord.webhook_url %}
-      <div class="card" style="margin-top: 1.5rem;">
-        <h2><span>Test webhook</span></h2>
-        <p class="field-help" style="margin-bottom: 0.75rem;">
-          Posts a test message with the current username and avatar.
-          Save first if you've changed those above.
-        </p>
-        <form method="post" action="{{ url_for('test_webhook') }}">
-          <button type="submit" class="ghost">Send test message</button>
-        </form>
+      <div class="card" data-card="webhook-test" style="margin-top: 1.25rem;">
+        <header class="collapsible">
+          <h2>Test webhook</h2>
+          <span class="chevron">▼</span>
+        </header>
+        <div class="body">
+          <p class="field-help" style="margin-bottom: 0.75rem;">
+            Posts a sample message with the current username and avatar.
+            Save first if you've changed those above.
+          </p>
+          <form method="post" action="{{ url_for('test_webhook') }}">
+            <button type="submit" class="ghost">Send test message</button>
+          </form>
+        </div>
       </div>
     {% endif %}
 
   </div>
+
+  <script>
+  // Separate localStorage namespace so settings collapse choices don't
+  // bleed into dashboard collapse choices.
+  const LS_PREFIX = 'ducky-settings-collapse:';
+
+  function applyCollapseState() {
+    document.querySelectorAll('.card[data-card]').forEach(card => {
+      const id = card.dataset.card;
+      const stored = localStorage.getItem(LS_PREFIX + id);
+      let collapsed;
+      if (stored === null) {
+        collapsed = card.dataset.defaultCollapsed === 'true';
+      } else {
+        collapsed = stored === '1';
+      }
+      card.classList.toggle('collapsed', collapsed);
+    });
+  }
+  function bindCollapseHandlers() {
+    document.querySelectorAll('.card[data-card] > header.collapsible').forEach(hdr => {
+      hdr.addEventListener('click', e => {
+        if (e.target.closest('button, form, a, input')) return;
+        const card = hdr.parentElement;
+        const id = card.dataset.card;
+        const nowCollapsed = !card.classList.contains('collapsed');
+        card.classList.toggle('collapsed', nowCollapsed);
+        localStorage.setItem(LS_PREFIX + id, nowCollapsed ? '1' : '0');
+      });
+    });
+  }
+  applyCollapseState();
+  bindCollapseHandlers();
+  </script>
 </body>
 </html>
