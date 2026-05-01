@@ -367,6 +367,40 @@ def get_workers() -> list[dict]:
 
 # ──────────────────────────── webhook ────────────────────────────
 
+# Cache the BCH network difficulty so we don't hit RPC for every webhook tick.
+# 30s TTL is plenty: BCH retargets per-block and the difficulty barely moves.
+_diff_cache: dict = {"value": None, "fetched_at": 0}
+_DIFF_CACHE_TTL = 30
+
+
+def get_network_difficulty() -> float | None:
+    """Returns the current BCH network difficulty, or None if RPC fails.
+    Cached for ~30 seconds."""
+    now = int(time.time())
+    if _diff_cache["value"] is not None and (now - _diff_cache["fetched_at"]) < _DIFF_CACHE_TTL:
+        return _diff_cache["value"]
+    try:
+        info = rpc("getmininginfo")
+        diff = float(info.get("difficulty", 0))
+        if diff > 0:
+            _diff_cache["value"] = diff
+            _diff_cache["fetched_at"] = now
+            return diff
+    except Exception:  # noqa: BLE001
+        pass
+    return _diff_cache["value"]   # may still be a stale value, better than None
+
+
+def progress_bar(current: float, target: float, width: int = 14) -> str:
+    """Render a Unicode block-meter showing progress towards `target`.
+    Filled cells use ▰, empty use ▱. Capped at 100%."""
+    if target <= 0:
+        return "▱" * width
+    pct = max(0.0, min(1.0, current / target))
+    filled = int(round(pct * width))
+    return "▰" * filled + "▱" * (width - filled)
+
+
 def _post_discord(content: str | None, embeds: list[dict] | None = None) -> tuple[bool, str]:
     s = load_settings()
     url = s["discord"]["webhook_url"]
@@ -386,6 +420,54 @@ def _post_discord(content: str | None, embeds: list[dict] | None = None) -> tupl
         return False, f"Discord returned {r.status_code}: {r.text[:200]}"
     except requests.RequestException as exc:
         return False, f"Network error: {exc}"
+
+
+def _build_best_share_embed(
+    worker_name: str,
+    current: float,
+    net_diff: float | None,
+    ts: int,
+) -> dict:
+    """Build the rich AxeBCH-style "new best share" embed."""
+    # Bitcoin Cash logo. crypto-logo.com is a CDN built for embedding,
+    # serves 128x128 transparent PNG which is the ideal Discord thumbnail size.
+    BCH_LOGO = "https://cdn.crypto-logo.com/logos/bitcoin-cash-bch/128x128/transparent.png"
+
+    fields = [
+        {"name": "🎯 Worker",     "value": f"**{worker_name}**", "inline": True},
+        {"name": "💎 Best Share", "value": humanise_diff(current), "inline": True},
+    ]
+    description_lines = [f"**{worker_name}** just hit a new best share!"]
+
+    if net_diff and net_diff > 0:
+        pct = (current / net_diff) * 100
+        bar = progress_bar(current, net_diff)
+        fields.append({
+            "name": "📈 Block Diff",
+            "value": humanise_diff(net_diff),
+            "inline": True,
+        })
+        description_lines.append("")
+        description_lines.append("📊 **Progress to Block**")
+        description_lines.append(f"`{bar}`  **{pct:.2f}%**")
+    else:
+        # No network diff available — still show a friendly note instead of
+        # a broken progress bar.
+        fields.append({
+            "name": "📈 Block Diff",
+            "value": "—",
+            "inline": True,
+        })
+
+    return {
+        "title": "🦆 New best share! (BCH)",
+        "description": "\n".join(description_lines),
+        "color": 0xF9A825,
+        "fields": fields,
+        "thumbnail": {"url": BCH_LOGO},
+        "footer": {"text": "Ducky Pool · Solo BCH"},
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts)),
+    }
 
 
 def _check_and_fire(now_ts: int) -> None:
@@ -425,19 +507,15 @@ def _check_and_fire(now_ts: int) -> None:
 
             if current > baseline and (now_ts - last_sent) >= WEBHOOK_MIN_INTERVAL:
                 worker_name = fname.split(".", 1)[1] if "." in fname else fname
+                net_diff = get_network_difficulty()
                 ok, _msg = _post_discord(
                     content=None,
-                    embeds=[{
-                        "title": "🦆 New best share!",
-                        "color": 0xF9A825,
-                        "fields": [
-                            {"name": "Worker", "value": f"`{worker_name}`", "inline": True},
-                            {"name": "Best share", "value": humanise_diff(current), "inline": True},
-                            {"name": "Previous", "value": humanise_diff(baseline), "inline": True},
-                            {"name": "1h hashrate", "value": str(data.get("hashrate1hr", "—")), "inline": True},
-                        ],
-                        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now_ts)),
-                    }],
+                    embeds=[_build_best_share_embed(
+                        worker_name=worker_name,
+                        current=current,
+                        net_diff=net_diff,
+                        ts=now_ts,
+                    )],
                 )
                 workers[fname] = {
                     "best": current,
@@ -728,14 +806,18 @@ def settings_save():
 
 @app.route("/webhook/test", methods=["POST"])
 def test_webhook():
-    ok, msg = _post_discord(
-        content=None,
-        embeds=[{
-            "title": "🦆 Ducky Pool test webhook",
-            "description": "If you can see this, Ducky Pool can reach Discord.",
-            "color": 0xF9A825,
-        }],
+    # Send a sample of the actual embed style so users see what real
+    # best-share notifications will look like.
+    net_diff = get_network_difficulty()
+    sample_current = (net_diff * 0.05) if net_diff else 1e9   # 5% of block as a sane sample
+    sample = _build_best_share_embed(
+        worker_name="test-worker",
+        current=sample_current,
+        net_diff=net_diff,
+        ts=int(time.time()),
     )
+    sample["title"] = "🦆 Test webhook (this is what new best shares will look like)"
+    ok, msg = _post_discord(content=None, embeds=[sample])
     flash("Test webhook sent." if ok else f"Test failed: {msg}", "ok" if ok else "error")
     return redirect(url_for("settings_page"))
 
