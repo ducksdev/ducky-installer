@@ -18,6 +18,7 @@ import json
 import os
 import re
 import socket
+import sqlite3
 import threading
 import time
 from glob import glob
@@ -52,6 +53,16 @@ FLASK_PORT = int(os.environ.get("FLASK_PORT", "4568"))
 STATE_DIR = os.environ.get("STATE_DIR", "/shared")
 SETTINGS_FILE = os.path.join(STATE_DIR, "settings.json")
 BASELINE_FILE = os.path.join(STATE_DIR, "best_baselines.json")
+SEEN_BLOCKS_FILE = os.path.join(STATE_DIR, "seen_blocks.json")
+HISTORY_DB = os.path.join(STATE_DIR, "history.db")
+
+# ckpool writes one line per found block here.
+BLOCKS_LOG = os.environ.get("BLOCKS_LOG", "/pool-logs/pool/blocks")
+
+# History retention — older rows are pruned on write. 30 days at 60s
+# resolution is ~43k rows, well under 5 MB.
+HISTORY_RETENTION_DAYS = 30
+HISTORY_SAMPLE_INTERVAL = 60   # seconds between recorded snapshots
 
 # Defaults — these are also encoded in ckpool's entrypoint.sh and must
 # match it. Don't drift the two.
@@ -365,6 +376,176 @@ def get_workers() -> list[dict]:
     return out
 
 
+# ──────────────────────────── blocks ────────────────────────────
+
+# ckpool's blocks file is one line per found block. Format varies a bit by
+# fork — common layout is space-separated:
+#   <unix_ts> <height> <hash> <diff> <reward_satoshis> <username>
+# We parse defensively.
+def parse_blocks_log() -> list[dict]:
+    if not os.path.exists(BLOCKS_LOG):
+        return []
+    out: list[dict] = []
+    try:
+        with open(BLOCKS_LOG, "r", encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line:
+                    continue
+                parts = line.split()
+                # Try to extract what we can; skip lines we can't make sense of.
+                rec = {"raw": line}
+                # Field 0 is usually unix timestamp
+                try:
+                    rec["ts"] = int(float(parts[0]))
+                except (ValueError, IndexError):
+                    rec["ts"] = None
+                # Find anything that looks like a 64-char hex hash
+                for p in parts:
+                    if len(p) == 64 and all(c in "0123456789abcdefABCDEF" for c in p):
+                        rec["hash"] = p.lower()
+                        break
+                # Find anything that looks like a height (small integer between 100k and 100m)
+                for p in parts:
+                    try:
+                        n = int(p)
+                        if 100_000 < n < 100_000_000 and "height" not in rec:
+                            rec["height"] = n
+                            break
+                    except ValueError:
+                        continue
+                # Find a username/worker (usually the last part if not numeric)
+                if parts and not parts[-1].replace(".", "", 1).isdigit():
+                    rec["worker"] = parts[-1]
+                out.append(rec)
+    except OSError:
+        return []
+    return out
+
+
+def get_blocks_summary() -> dict:
+    blocks = parse_blocks_log()
+    latest = blocks[-1] if blocks else None
+    return {
+        "count": len(blocks),
+        "latest": latest,
+    }
+
+
+# ──────────────────────────── history ────────────────────────────
+
+_db_lock = threading.Lock()
+
+
+def _hashrate_str_to_float(s: str | float | int | None) -> float | None:
+    """Parse ckpool-style hashrate strings like '1.74T' to a float in H/s.
+    Returns None if unparseable."""
+    if s is None or s == "—":
+        return None
+    if isinstance(s, (int, float)):
+        return float(s)
+    s = str(s).strip()
+    if not s or s == "0":
+        return 0.0
+    units = {"K": 1e3, "M": 1e6, "G": 1e9, "T": 1e12, "P": 1e15, "E": 1e18}
+    suffix = s[-1].upper()
+    if suffix in units:
+        try:
+            return float(s[:-1]) * units[suffix]
+        except ValueError:
+            return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _open_db() -> sqlite3.Connection:
+    os.makedirs(STATE_DIR, exist_ok=True)
+    conn = sqlite3.connect(HISTORY_DB, timeout=5)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS hashrate (
+            ts INTEGER PRIMARY KEY,
+            hashrate_1m REAL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_hashrate_ts ON hashrate(ts)")
+    return conn
+
+
+def record_history_sample(now_ts: int) -> None:
+    """Record a snapshot of pool hashrate. Called from the watcher thread."""
+    pool = get_pool_stats()
+    if not pool.get("ok"):
+        return
+    rate = _hashrate_str_to_float(pool.get("hashrate_1m"))
+    if rate is None:
+        return
+
+    with _db_lock:
+        conn = _open_db()
+        try:
+            conn.execute(
+                "INSERT OR REPLACE INTO hashrate(ts, hashrate_1m) VALUES (?, ?)",
+                (now_ts, rate),
+            )
+            # Prune anything older than retention window
+            cutoff = now_ts - HISTORY_RETENTION_DAYS * 86400
+            conn.execute("DELETE FROM hashrate WHERE ts < ?", (cutoff,))
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def read_history(window_seconds: int) -> list[tuple[int, float]]:
+    """Returns (timestamp, hashrate) pairs covering the last `window_seconds`."""
+    since = int(time.time()) - window_seconds
+    with _db_lock:
+        conn = _open_db()
+        try:
+            rows = conn.execute(
+                "SELECT ts, hashrate_1m FROM hashrate WHERE ts >= ? ORDER BY ts",
+                (since,),
+            ).fetchall()
+        finally:
+            conn.close()
+    return [(int(r[0]), float(r[1])) for r in rows]
+
+
+# ──────────────────────────── ETA ────────────────────────────
+
+def block_eta(pool_hashrate_hs: float | None, net_diff: float | None) -> dict:
+    """Given the pool's current hashrate (in H/s) and network difficulty,
+    estimate the expected time to find a block. Returns a dict with both a
+    seconds value and a human-readable form."""
+    if not pool_hashrate_hs or pool_hashrate_hs <= 0 or not net_diff or net_diff <= 0:
+        return {"ok": False}
+    # Standard formula: expected seconds = diff * 2^32 / hashrate
+    seconds = net_diff * (2 ** 32) / pool_hashrate_hs
+    blocks_per_year = (365 * 86400) / seconds if seconds > 0 else 0.0
+
+    if seconds < 60:
+        human = f"~{seconds:.0f}s"
+    elif seconds < 3600:
+        human = f"~{seconds / 60:.0f}m"
+    elif seconds < 86400:
+        human = f"~{seconds / 3600:.1f}h"
+    elif seconds < 86400 * 365:
+        human = f"~{seconds / 86400:.1f}d"
+    else:
+        human = f"~{seconds / 86400 / 365:.1f}y"
+
+    return {
+        "ok": True,
+        "seconds": int(seconds),
+        "human": human,
+        "blocks_per_year": blocks_per_year,
+        "per_year_human": (
+            f"{blocks_per_year:.2f}/yr" if blocks_per_year >= 0.01 else f"{blocks_per_year:.4f}/yr"
+        ),
+    }
+
+
 # ──────────────────────────── webhook ────────────────────────────
 
 # Cache the BCH network difficulty so we don't hit RPC for every webhook tick.
@@ -530,36 +711,173 @@ def _check_and_fire(now_ts: int) -> None:
             _save_baselines(state)
 
 
+def _load_seen_blocks() -> set:
+    try:
+        with open(SEEN_BLOCKS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict) and isinstance(data.get("hashes"), list):
+            return set(data["hashes"])
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    return set()
+
+
+def _save_seen_blocks(seen: set) -> None:
+    _atomic_write_json(SEEN_BLOCKS_FILE, {"hashes": sorted(seen)})
+
+
+def _check_blocks_and_fire(now_ts: int) -> None:
+    """Walk the ckpool blocks log. For any block we haven't sent yet, fire
+    a celebratory webhook and record the hash so we don't replay."""
+    s = load_settings()
+    if not s["discord"]["webhook_url"]:
+        return
+
+    blocks = parse_blocks_log()
+    if not blocks:
+        return
+
+    with _state_lock:
+        seen = _load_seen_blocks()
+        first_run = not seen
+        new_blocks = []
+        for b in blocks:
+            h = b.get("hash")
+            if not h:
+                continue
+            if h not in seen:
+                new_blocks.append(b)
+                seen.add(h)
+
+        if not new_blocks:
+            return
+
+        # First-sight rule: on the very first run after install, record
+        # everything silently rather than firing webhooks for historical
+        # blocks (e.g. after a backup-restore).
+        if first_run:
+            _save_seen_blocks(seen)
+            return
+
+        for b in new_blocks:
+            ok, _msg = _post_discord(
+                content=None,
+                embeds=[_build_block_found_embed(b, now_ts)],
+            )
+            if not ok:
+                # Roll this hash out so we retry next tick.
+                seen.discard(b.get("hash"))
+
+        _save_seen_blocks(seen)
+
+
+def _build_block_found_embed(block: dict, ts: int) -> dict:
+    """Big celebratory embed for a found block."""
+    BCH_LOGO = "https://cdn.crypto-logo.com/logos/bitcoin-cash-bch/128x128/transparent.png"
+    EXPLORER = "https://blockchair.com/bitcoin-cash/block/{hash}"
+
+    height = block.get("height")
+    h = block.get("hash")
+    worker = block.get("worker")
+
+    fields = []
+    if height is not None:
+        fields.append({"name": "📦 Height", "value": f"`{height:,}`", "inline": True})
+    if worker:
+        fields.append({"name": "⛏️ Found by", "value": f"`{worker}`", "inline": True})
+    if h:
+        fields.append({
+            "name": "🔗 Hash",
+            "value": f"[`{h[:8]}…{h[-8:]}`]({EXPLORER.format(hash=h)})",
+            "inline": False,
+        })
+
+    description = "**🎉 BLOCK FOUND! 🎉**\n\nDucky Pool just solved a Bitcoin Cash block."
+    if not fields:
+        description += "\n\n*ckpool didn't include parseable block details — check the log.*"
+
+    return {
+        "title": "🟢 BLOCK FOUND (BCH)",
+        "description": description,
+        "color": 0x4CD964,   # green for celebration
+        "fields": fields,
+        "thumbnail": {"url": BCH_LOGO},
+        "footer": {"text": "Ducky Pool · Solo BCH"},
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts)),
+    }
+
+
+_last_history_ts = 0
+
+
 def _watcher_loop() -> None:
+    global _last_history_ts
     while True:
+        now = int(time.time())
         try:
-            _check_and_fire(int(time.time()))
+            _check_and_fire(now)
         except Exception as exc:  # noqa: BLE001
-            app.logger.exception("watcher tick failed: %s", exc)
+            app.logger.exception("best-share watcher tick failed: %s", exc)
+        try:
+            _check_blocks_and_fire(now)
+        except Exception as exc:  # noqa: BLE001
+            app.logger.exception("blocks watcher tick failed: %s", exc)
+        # Record a history sample on its own cadence (every minute by default)
+        if now - _last_history_ts >= HISTORY_SAMPLE_INTERVAL:
+            try:
+                record_history_sample(now)
+                _last_history_ts = now
+            except Exception as exc:  # noqa: BLE001
+                app.logger.exception("history sample failed: %s", exc)
         time.sleep(WATCHER_INTERVAL)
 
 
 def _start_watcher() -> None:
-    t = threading.Thread(target=_watcher_loop, name="best-share-watcher", daemon=True)
+    t = threading.Thread(target=_watcher_loop, name="ducky-watcher", daemon=True)
     t.start()
 
 
 # ──────────────────────────── routes ────────────────────────────
 
+def _build_stats_payload(public: bool = False) -> dict:
+    """Shared stats payload for /api/stats and /api/public/stats. The
+    public variant strips fields a stranger shouldn't see."""
+    pool = get_pool_stats()
+    blocks = get_blocks_summary()
+    net_diff = get_network_difficulty()
+    pool_hashrate_hs = _hashrate_str_to_float(pool.get("hashrate_1m")) if pool.get("ok") else None
+    eta = block_eta(pool_hashrate_hs, net_diff)
+
+    payload = {
+        "node": get_node_status(),
+        "pool": pool,
+        "workers": get_workers(),
+        "blocks": blocks,
+        "eta": eta,
+        "now": int(time.time()),
+    }
+    if not public:
+        s = load_settings()
+        payload["payout"] = read_payout()
+        payload["webhook_set"] = bool(s["discord"]["webhook_url"])
+    return payload
+
+
 @app.route("/", methods=["GET"])
 def index():
     settings = load_settings()
-    status = get_node_status()
-    pool = get_pool_stats()
-    workers = get_workers()
+    payload = _build_stats_payload(public=False)
     payout = read_payout()
     host = request.host.split(":")[0] or socket.gethostname()
     stratum_url = f"stratum+tcp://{host}:{STRATUM_PORT}"
     return render_template(
         "index.html",
-        status=status,
-        pool=pool,
-        workers=workers,
+        public=False,
+        status=payload["node"],
+        pool=payload["pool"],
+        workers=payload["workers"],
+        blocks=payload["blocks"],
+        eta=payload["eta"],
         payout=payout,
         stratum_url=stratum_url,
         stratum_port=STRATUM_PORT,
@@ -567,16 +885,47 @@ def index():
     )
 
 
+@app.route("/public", methods=["GET"])
+def public_view():
+    """Read-only public dashboard. Hides payout address, settings link,
+    and admin actions (reset/wipe/forget). Always reachable."""
+    payload = _build_stats_payload(public=True)
+    host = request.host.split(":")[0] or socket.gethostname()
+    stratum_url = f"stratum+tcp://{host}:{STRATUM_PORT}"
+    return render_template(
+        "index.html",
+        public=True,
+        status=payload["node"],
+        pool=payload["pool"],
+        workers=payload["workers"],
+        blocks=payload["blocks"],
+        eta=payload["eta"],
+        payout="",                # never send to public template
+        stratum_url=stratum_url,
+        stratum_port=STRATUM_PORT,
+        webhook_set=False,
+    )
+
+
 @app.route("/api/stats", methods=["GET"])
 def api_stats():
-    s = load_settings()
+    return jsonify(_build_stats_payload(public=False))
+
+
+@app.route("/api/public/stats", methods=["GET"])
+def api_public_stats():
+    return jsonify(_build_stats_payload(public=True))
+
+
+@app.route("/api/history", methods=["GET"])
+def api_history():
+    """Hashrate history for the sparkline. ?range=1h|24h|7d (default 24h)."""
+    rng = (request.args.get("range") or "24h").lower()
+    seconds = {"1h": 3600, "24h": 86400, "7d": 86400 * 7}.get(rng, 86400)
+    rows = read_history(seconds)
     return jsonify({
-        "node": get_node_status(),
-        "pool": get_pool_stats(),
-        "workers": get_workers(),
-        "payout": read_payout(),
-        "webhook_set": bool(s["discord"]["webhook_url"]),
-        "now": int(time.time()),
+        "range": rng,
+        "points": [{"ts": t, "hashrate": h} for t, h in rows],
     })
 
 
