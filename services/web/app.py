@@ -200,6 +200,8 @@ def worker_status(age_seconds: float | None) -> str:
 
 
 def _load_json_loose(raw: str) -> dict | None:
+    """Parse a single JSON object, falling back to the last valid JSON
+    line if the whole text isn't a valid object (handles trailing junk)."""
     raw = raw.strip()
     if not raw:
         return None
@@ -215,6 +217,64 @@ def _load_json_loose(raw: str) -> dict | None:
             except json.JSONDecodeError:
                 continue
     return None
+
+
+def _load_json_merged(raw: str) -> dict | None:
+    """ckpool writes pool.status as multiple JSON objects, one per line:
+        {"runtime": ..., "Users": ..., "Workers": ...}
+        {"hashrate1m": "...", "hashrate1hr": "...", ...}
+        {"diff": ..., "accepted": ..., "bestshare": ...}
+    Parse every valid line and merge them into one dict (later lines win
+    on key conflict, but the schemas don't overlap so it doesn't matter)."""
+    raw = raw.strip()
+    if not raw:
+        return None
+    merged: dict = {}
+    any_ok = False
+    for ln in raw.splitlines():
+        ln = ln.strip()
+        if not ln:
+            continue
+        try:
+            obj = json.loads(ln)
+            if isinstance(obj, dict):
+                merged.update(obj)
+                any_ok = True
+        except json.JSONDecodeError:
+            continue
+    return merged if any_ok else None
+
+
+def humanise_hashrate(s: str | float | int | None) -> str:
+    """Normalise ckpool's hashrate strings ('33T', '2.98G') to '33.00 TH/s'.
+    Pass-through for already-normalised strings. Returns '—' if unparseable."""
+    if s is None or s == "—":
+        return "—"
+    if isinstance(s, (int, float)):
+        if s <= 0:
+            return "—"
+        units = [("EH/s", 1e18), ("PH/s", 1e15), ("TH/s", 1e12),
+                 ("GH/s", 1e9), ("MH/s", 1e6), ("KH/s", 1e3)]
+        for unit, threshold in units:
+            if s >= threshold:
+                return f"{s / threshold:.2f} {unit}"
+        return f"{s:.0f} H/s"
+    text = str(s).strip()
+    if not text or text == "0":
+        return "0 H/s"
+    suffix_map = {"K": "KH/s", "M": "MH/s", "G": "GH/s", "T": "TH/s",
+                  "P": "PH/s", "E": "EH/s"}
+    if text and text[-1].upper() in suffix_map:
+        unit = suffix_map[text[-1].upper()]
+        try:
+            value = float(text[:-1])
+            return f"{value:.2f} {unit}"
+        except ValueError:
+            return text
+    try:
+        return humanise_hashrate(float(text))
+    except ValueError:
+        return text
 
 
 # ──────────────────────────── settings ────────────────────────────
@@ -336,7 +396,7 @@ def get_node_status() -> dict:
 def get_pool_stats() -> dict:
     try:
         with open(POOL_STATUS_FILE, "r", encoding="utf-8") as f:
-            data = _load_json_loose(f.read())
+            data = _load_json_merged(f.read())
         if data is None:
             return {"ok": False, "reason": "empty"}
         last_update = int(data.get("lastupdate", 0) or 0)
@@ -349,9 +409,11 @@ def get_pool_stats() -> dict:
             "workers": data.get("Workers", 0),
             "idle": data.get("Idle", 0),
             "disconnected": data.get("Disconnected", 0),
-            "hashrate_1m": data.get("hashrate1m", "—"),
-            "hashrate_1hr": data.get("hashrate1hr", "—"),
-            "hashrate_24hr": data.get("hashrate1d") or data.get("hashrate24hr") or "—",
+            "hashrate_1m": humanise_hashrate(data.get("hashrate1m")),
+            "hashrate_1hr": humanise_hashrate(data.get("hashrate1hr")),
+            "hashrate_24hr": humanise_hashrate(
+                data.get("hashrate1d") or data.get("hashrate24hr")
+            ),
             "accepted": data.get("accepted", 0),
             "rejected": data.get("rejected", 0),
             "best_share": humanise_diff(data.get("bestshare", 0)),
@@ -403,9 +465,11 @@ def get_workers() -> list[dict]:
                 "status": worker_status(age),
                 "age_s": age,
                 "age_human": humanise_age(age),
-                "hashrate_1m": w.get("hashrate1m", "—"),
-                "hashrate_1hr": w.get("hashrate1hr", "—"),
-                "hashrate_24hr": w.get("hashrate1d") or w.get("hashrate24hr") or "—",
+                "hashrate_1m": humanise_hashrate(w.get("hashrate1m")),
+                "hashrate_1hr": humanise_hashrate(w.get("hashrate1hr")),
+                "hashrate_24hr": humanise_hashrate(
+                    w.get("hashrate1d") or w.get("hashrate24hr")
+                ),
                 "shares": w.get("shares", 0),
                 "best_share": humanise_diff(best),
             })
