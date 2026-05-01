@@ -137,18 +137,45 @@ while true; do
     # would re-read its own re-created file and "Loaded N users" again.
     # Killing ckpool first guarantees those files don't get re-written.
     if [ -e "$RESTART_MARKER" ]; then
-        echo "[entrypoint] restart marker present; forcing ckpool restart with state wipe"
-        stop_ckpool
-        # Now ckpool is dead — safe to nuke its state files.
-        if [ -d "/var/log/ckpool/users" ]; then
-            rm -f /var/log/ckpool/users/* 2>/dev/null || true
+        # Move the marker out of the way FIRST so we don't loop if the
+        # subsequent rm fails (volume mounted ro, weird permissions, etc).
+        # As long as the rename succeeds, the original path is gone and
+        # the next loop iteration won't see a marker.
+        STAMP="$(date +%s)"
+        STAGED="${RESTART_MARKER}.processing.${STAMP}"
+        if mv "$RESTART_MARKER" "$STAGED" 2>/dev/null; then
+            echo "[entrypoint] restart marker present; forcing ckpool restart with state wipe"
+            stop_ckpool
+            # Now ckpool is dead — safe to nuke its state files.
+            if [ -d "/var/log/ckpool/users" ]; then
+                rm -f /var/log/ckpool/users/* 2>/dev/null || true
+            fi
+            if [ -d "/var/log/ckpool/pool" ]; then
+                rm -f /var/log/ckpool/pool/pool.status 2>/dev/null || true
+            fi
+            rm -f "$STAGED" 2>/dev/null || true
+            LAST_HASH=""
+        else
+            # Could not rename — likely a permissions problem. Log loudly
+            # and break the marker out of the loop by re-trying delete
+            # once. If even that fails, sleep longer to avoid thrashing.
+            echo "[entrypoint] WARN: could not move restart marker out of the way (perms?); attempting direct delete"
+            if rm -f "$RESTART_MARKER" 2>/dev/null; then
+                echo "[entrypoint] direct delete succeeded"
+                stop_ckpool
+                if [ -d "/var/log/ckpool/users" ]; then
+                    rm -f /var/log/ckpool/users/* 2>/dev/null || true
+                fi
+                if [ -d "/var/log/ckpool/pool" ]; then
+                    rm -f /var/log/ckpool/pool/pool.status 2>/dev/null || true
+                fi
+                LAST_HASH=""
+            else
+                echo "[entrypoint] ERROR: cannot delete $RESTART_MARKER — restart loop blocked. Sleeping 60s."
+                sleep 60
+                continue
+            fi
         fi
-        if [ -d "/var/log/ckpool/pool" ]; then
-            rm -f /var/log/ckpool/pool/pool.status 2>/dev/null || true
-        fi
-        rm -f "$RESTART_MARKER" 2>/dev/null || true
-        # Force the next iteration to start ckpool by clearing LAST_HASH.
-        LAST_HASH=""
     fi
 
     CUR_HASH="$(ckpool_settings_hash)"
