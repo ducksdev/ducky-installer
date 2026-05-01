@@ -10,7 +10,7 @@
 #   6. Installs a systemd unit so it boots with the host
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/ducksdev/ducky-pool/main/install.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/ducksdev/ducky-installer/main/install.sh | sudo bash
 #
 # Or from a local clone:
 #   sudo ./install.sh
