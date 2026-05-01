@@ -1191,26 +1191,12 @@ def reset_stats():
     name = (request.form.get("name") or "").strip()
 
     if name == "__pool__":
-        user_count = 0
-        if os.path.isdir(WORKERS_DIR):
-            for path in glob(os.path.join(WORKERS_DIR, "*")):
-                fname = os.path.basename(path)
-                if not USER_FILENAME_RE.match(fname):
-                    continue
-                try:
-                    if _safe_remove(path, WORKERS_DIR):
-                        user_count += 1
-                except (OSError, ValueError) as exc:
-                    app.logger.warning("could not remove %s: %s", path, exc)
-
-        pool_status_reset = False
-        try:
-            if os.path.exists(POOL_STATUS_FILE):
-                with open(POOL_STATUS_FILE, "w", encoding="utf-8") as f:
-                    f.write("")
-                pool_status_reset = True
-        except OSError as exc:
-            app.logger.warning("could not truncate pool.status: %s", exc)
+        # Note: we no longer delete user files or pool.status here.
+        # Doing so while ckpool is still alive is racey — ckpool's flush
+        # would just rewrite them with current state, and on restart it
+        # would re-load that "fresh" file. The entrypoint now wipes those
+        # files AFTER ckpool exits, which is the only safe time. See
+        # services/ckpool/entrypoint.sh restart-marker block.
 
         with _state_lock:
             state = _load_baselines()
@@ -1236,33 +1222,25 @@ def reset_stats():
 
         restart_ok = _request_ckpool_restart()
 
-        bits = [f"Cleared stats for {user_count} address file(s)"]
-        if pool_status_reset:
-            bits.append("reset pool best")
-        bits.append("baselines cleared")
+        bits = ["baselines cleared"]
         if history_rows_cleared:
             bits.append(f"history wiped ({history_rows_cleared} samples)")
         if restart_ok:
-            bits.append("ckpool restart queued")
+            bits.append("ckpool restart queued (state wipe will run after kill)")
         flash(
             " · ".join(bits)
-            + ". Miners will reconnect within ~10s; ckpool will rebuild stats from the next share.",
+            + ". Miners will reconnect within ~10s; the dashboard will rebuild stats from the next share.",
             "ok",
         )
 
     else:
         if not WORKER_ID_RE.match(name):
             abort(400, "invalid worker name")
-        # Wipe is per-user-file in this layout — clears every worker that
-        # mines to the same payout address, not just this one. The
-        # confirmation dialog in the template warns about this.
+        # In solo mode the per-worker reset is functionally identical to
+        # the pool-wide one — ckpool's restart wipes everything. We keep
+        # the per-worker button so the UI stays consistent and gives the
+        # user a clear "this row's reset" affordance.
         address = name.split(".", 1)[0]
-        target = os.path.join(WORKERS_DIR, address)
-        try:
-            removed = _safe_remove(target, WORKERS_DIR)
-        except (OSError, ValueError) as exc:
-            flash(f"Could not reset stats: {exc}", "error")
-            return redirect(url_for("index"))
 
         with _state_lock:
             state = _load_baselines()
@@ -1273,22 +1251,14 @@ def reset_stats():
             if dropped:
                 _save_baselines(state)
 
-        # Same reasoning as pool-wide wipe — ckpool's in-memory bestshare
-        # for this address survives a file delete, so request a restart.
         _request_ckpool_restart()
 
         wname = name.split(".", 1)[1] if "." in name else name
-        if removed:
-            flash(
-                f"Stats wiped for {wname} (and any siblings under the same address). "
-                "ckpool will rebuild from the next share.",
-                "ok",
-            )
-        else:
-            flash(
-                f"No stats file to wipe for {wname}'s address (baselines still cleared).",
-                "ok",
-            )
+        flash(
+            f"Reset queued for {wname}. ckpool will restart and rebuild stats "
+            "from the next share. Miner will reconnect within ~10s.",
+            "ok",
+        )
 
     return redirect(url_for("index"))
 

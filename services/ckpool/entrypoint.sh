@@ -111,6 +111,8 @@ stop_ckpool() {
 
 wait_for_node
 
+RESTART_MARKER="${RESTART_MARKER:-/shared/.restart_ckpool}"
+
 LAST_HASH=""
 while true; do
     ADDR="$(read_address)"
@@ -123,6 +125,30 @@ while true; do
         fi
         sleep 10
         continue
+    fi
+
+    # Manual restart marker — web container drops this file when an admin
+    # action (e.g. Reset stats) needs ckpool's in-memory state cleared.
+    #
+    # We must wipe ckpool's on-disk state files (users/<addr> and
+    # pool/pool.status) AFTER ckpool exits, not before. If we deleted them
+    # while ckpool was still alive, ckpool's periodic flush would just
+    # re-create them with current state — and on the next start ckpool
+    # would re-read its own re-created file and "Loaded N users" again.
+    # Killing ckpool first guarantees those files don't get re-written.
+    if [ -e "$RESTART_MARKER" ]; then
+        echo "[entrypoint] restart marker present; forcing ckpool restart with state wipe"
+        stop_ckpool
+        # Now ckpool is dead — safe to nuke its state files.
+        if [ -d "/var/log/ckpool/users" ]; then
+            rm -f /var/log/ckpool/users/* 2>/dev/null || true
+        fi
+        if [ -d "/var/log/ckpool/pool" ]; then
+            rm -f /var/log/ckpool/pool/pool.status 2>/dev/null || true
+        fi
+        rm -f "$RESTART_MARKER" 2>/dev/null || true
+        # Force the next iteration to start ckpool by clearing LAST_HASH.
+        LAST_HASH=""
     fi
 
     CUR_HASH="$(ckpool_settings_hash)"
