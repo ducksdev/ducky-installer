@@ -304,6 +304,53 @@
       font-size: 0.7rem; color: var(--muted);
     }
 
+    /* ── Duck-O-Meter (headline cards above miners table) ───────── */
+    .duck-o-meters {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+      gap: 0.75rem;
+    }
+    .duck-card {
+      background: linear-gradient(180deg, rgba(91,138,166,0.04) 0%, rgba(249,168,37,0.03) 100%);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.85rem 1rem;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0.45rem;
+    }
+    .duck-card .duck-head {
+      display: flex; align-items: baseline; justify-content: space-between;
+      gap: 0.5rem;
+    }
+    .duck-card .duck-name {
+      font-size: 0.95rem; font-weight: 500; color: var(--fg);
+    }
+    .duck-card .duck-tier {
+      font-size: 0.82rem; color: var(--accent);
+      font-weight: 500; letter-spacing: 0.01em;
+    }
+    .duck-card .duck-flavor {
+      font-size: 0.78rem; color: var(--muted); font-style: italic;
+      margin-top: -0.15rem;
+    }
+    .duck-card .duck-pond {
+      width: 100%; aspect-ratio: 14 / 1;
+      max-height: 56px;
+      border-radius: 8px; overflow: hidden;
+      background: linear-gradient(180deg, rgba(91,138,166,0.08), rgba(91,138,166,0.18));
+      border: 1px solid rgba(91,138,166,0.18);
+    }
+    .duck-card .duck-pond svg { width: 100%; height: 100%; display: block; }
+    .duck-card .duck-stats {
+      display: flex; justify-content: space-between; gap: 0.5rem;
+      font-size: 0.78rem; color: var(--muted);
+      font-family: ui-monospace, monospace;
+    }
+    .duck-card .duck-stats .label { color: var(--muted); margin-right: 0.3rem; }
+    .duck-card .duck-stats .v { color: var(--fg); font-weight: 500; }
+    .duck-card .duck-stats .pct { color: var(--accent); font-weight: 500; }
+
     /* ── blocks ────────────────────────────────────────────────── */
     .blocks-empty {
       text-align: center; padding: 0.5rem 0;
@@ -422,6 +469,35 @@
           <div class="body">
             <div id="sparkline-body">
               <p class="sparkline-empty">Collecting data…</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Duck-O-Meter — headline card per worker -->
+        <div class="card" data-card="duck-o-meter"{% if not workers %} style="display: none;"{% endif %}>
+          <header class="collapsible">
+            <h2>Duck-O-Meter</h2>
+            <span class="chevron">▼</span>
+          </header>
+          <div class="body">
+            <div class="duck-o-meters" id="duck-o-meters-body">
+              {% for w in workers %}
+                <div class="duck-card" data-worker="{{ w.id }}">
+                  <div class="duck-head">
+                    <span class="duck-name">{{ w.name }}</span>
+                    <span class="duck-tier">{{ w.stage_emoji }} {{ w.stage_label }}</span>
+                  </div>
+                  <span class="duck-flavor">{{ w.stage_flavor }}</span>
+                  <div class="duck-pond">
+                    {{ pond_svg(w.stage_level or 0, 360, 56) | safe }}
+                  </div>
+                  <div class="duck-stats">
+                    <span><span class="label">Share</span><span class="v">{{ w.best_share }}</span></span>
+                    <span><span class="label">Target</span><span class="v">{{ net_diff_human or "—" }}</span></span>
+                    <span><span class="label">% to bread</span><span class="pct">{{ "%.4f"|format(w.progress_pct or 0) }}%</span></span>
+                  </div>
+                </div>
+              {% endfor %}
             </div>
           </div>
         </div>
@@ -842,6 +918,34 @@
     return reset + hide;
   }
 
+  function renderDuckOMeters(workers, netDiffHuman) {
+    if (!workers || !workers.length) return '';
+    const target = netDiffHuman || '—';
+    return workers.map(w => {
+      const tier = w.stage_label || 'Empty pond';
+      const flavor = w.stage_flavor || '';
+      const emoji = w.stage_emoji || '🦆';
+      const share = w.best_share || '—';
+      const pct = (w.progress_pct && w.progress_pct > 0)
+        ? Number(w.progress_pct).toFixed(4) + '%'
+        : '—';
+      const level = w.stage_level || 0;
+      return `<div class="duck-card" data-worker="${escapeHtml(w.id)}">
+        <div class="duck-head">
+          <span class="duck-name">${escapeHtml(w.name)}</span>
+          <span class="duck-tier">${emoji} ${escapeHtml(tier)}</span>
+        </div>
+        <span class="duck-flavor">${escapeHtml(flavor)}</span>
+        <div class="duck-pond">${pondSVG(level, {width: 360, height: 56})}</div>
+        <div class="duck-stats">
+          <span><span class="label">Share</span><span class="v">${escapeHtml(String(share))}</span></span>
+          <span><span class="label">Target</span><span class="v">${escapeHtml(String(target))}</span></span>
+          <span><span class="label">% to bread</span><span class="pct">${pct}</span></span>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
   function renderWorkers(workers) {
     if (!workers.length) {
       return '<p class="miners-empty">No miners connected yet. Point one at the stratum URL.</p>';
@@ -982,6 +1086,18 @@
       document.getElementById('pool-body').innerHTML = renderPool(data.pool, data.eta);
       document.getElementById('blocks-body').innerHTML = renderBlocks(data.blocks);
       document.getElementById('miners-body').innerHTML = renderWorkers(data.workers);
+      // Duck-O-Meter grid — only present if there are workers.
+      const duckBody = document.getElementById('duck-o-meters-body');
+      if (duckBody) {
+        if (data.workers && data.workers.length) {
+          duckBody.innerHTML = renderDuckOMeters(data.workers, data.net_diff_human);
+          const card = duckBody.closest('[data-card="duck-o-meter"]');
+          if (card) card.style.display = '';
+        } else {
+          const card = duckBody.closest('[data-card="duck-o-meter"]');
+          if (card) card.style.display = 'none';
+        }
+      }
       liveDot.classList.remove('error');
       liveDot.title = 'Live — updates every 10s';
     } catch (e) {

@@ -1619,6 +1619,8 @@ def _build_stats_payload(public: bool = False) -> dict:
         "blocks": blocks,
         "eta": eta,
         "now": int(time.time()),
+        "net_diff": net_diff,
+        "net_diff_human": humanise_diff(net_diff) if net_diff else "—",
     }
     if not public:
         s = load_settings()
@@ -1642,6 +1644,7 @@ def index():
         workers=payload["workers"],
         blocks=payload["blocks"],
         eta=payload["eta"],
+        net_diff_human=payload["net_diff_human"],
         payout=payout,
         stratum_url=stratum_url,
         stratum_port=STRATUM_PORT,
@@ -1664,6 +1667,7 @@ def public_view():
         workers=payload["workers"],
         blocks=payload["blocks"],
         eta=payload["eta"],
+        net_diff_human=payload["net_diff_human"],
         payout="",                # never send to public template
         stratum_url=stratum_url,
         stratum_port=STRATUM_PORT,
