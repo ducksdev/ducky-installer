@@ -322,14 +322,26 @@ def save_settings(new: dict) -> None:
 
 
 def _load_baselines() -> dict:
+    """State file schema:
+        {
+          "workers": { "<addr>.<name>": {best, last_sent_ts, reset_snapshot} },
+          "hidden":  { "<addr>.<name>": <unix_ts_when_hidden> }
+        }
+    The 'hidden' dict is populated by the Forget action. get_workers()
+    filters out workers in this dict UNLESS their lastshare is more
+    recent than the hidden_at timestamp (i.e. they came back online),
+    in which case they're auto-unhidden."""
     try:
         with open(BASELINE_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, dict) and isinstance(data.get("workers"), dict):
+            # Backfill hidden if the file predates this field.
+            if not isinstance(data.get("hidden"), dict):
+                data["hidden"] = {}
             return data
     except (FileNotFoundError, json.JSONDecodeError):
         pass
-    return {"workers": {}}
+    return {"workers": {}, "hidden": {}}
 
 
 def _save_baselines(data: dict) -> None:
@@ -383,14 +395,19 @@ def _discover_workers_from_disk() -> list[str]:
 
 
 def reset_baseline(worker_id: str | None) -> int:
+    """Soft reset for a worker (or all workers when worker_id is None /
+    '__pool__'). Records ckpool's CURRENT bestshare as the
+    `reset_snapshot` so the dashboard hides the Best column until ckpool
+    reports a new value above the snapshot. Also resets the Discord
+    webhook baseline so a fresh ATH can fire a notification.
+
+    Does NOT restart ckpool or affect the miner connection. The hard
+    pool-wide reset (which DOES restart ckpool) is in /stats/reset."""
     with _state_lock:
         data = _load_baselines()
         workers = data["workers"]
 
         if worker_id in (None, "__pool__"):
-            # Union of (workers we already track) + (workers ckpool reports)
-            # so we reset baselines even on first run when nothing has been
-            # tracked yet.
             targets = list(set(workers.keys()) | set(_discover_workers_from_disk()))
         else:
             targets = [worker_id]
@@ -398,11 +415,15 @@ def reset_baseline(worker_id: str | None) -> int:
         for wid in targets:
             current = _read_worker_current_best(wid)
             if current <= 0:
-                # Fall back to whatever baseline we already have, so the
-                # user doesn't end up with a zeroed baseline that fires a
-                # webhook the moment ANY share comes in.
+                # Worker hasn't reported a bestshare yet — fall back to
+                # whatever baseline we have so we don't spuriously fire
+                # a webhook when the first share arrives.
                 current = float(workers.get(wid, {}).get("best", 0))
-            workers[wid] = {"best": current, "last_sent_ts": 0}
+            workers[wid] = {
+                "best": current,
+                "last_sent_ts": 0,
+                "reset_snapshot": current,  # hide Best until we beat this
+            }
 
         _save_baselines(data)
         return len(targets)
@@ -462,11 +483,28 @@ def get_pool_stats() -> dict:
 
 def get_workers() -> list[dict]:
     """Walk /users/* (one file per BCH address), expand each file's
-    nested `worker` array into one dashboard row per worker."""
+    nested `worker` array into one dashboard row per worker.
+
+    Per-worker reset is implemented as a "soft" reset — when the user
+    clicks Reset on a worker row, we record ckpool's current bestshare
+    for that worker as a `reset_snapshot` in best_baselines.json. The
+    displayed Best is then 0 until ckpool reports a new value above the
+    snapshot. This avoids restarting ckpool (no miner blip).
+    """
     if not os.path.isdir(WORKERS_DIR):
         return []
     now = int(time.time())
     out: list[dict] = []
+
+    # Load baselines once per call so we can apply the reset_snapshot
+    # filter and the hidden-workers filter without hammering disk.
+    with _state_lock:
+        state = _load_baselines()
+        baselines = state.get("workers", {})
+        hidden = dict(state.get("hidden", {}))  # copy — we may auto-unhide
+
+    auto_unhidden: list[str] = []  # collected so we can persist after the loop
+
     for path in glob(os.path.join(WORKERS_DIR, "*")):
         fname = os.path.basename(path)
         if not USER_FILENAME_RE.match(fname):
@@ -493,10 +531,57 @@ def get_workers() -> list[dict]:
 
             last = int(w.get("lastshare", 0) or 0)
             age = (now - last) if last else None
-            best = w.get("bestshare", 0) or w.get("bestever", 0) or 0
+
+            # Hidden filter: skip workers the user has Hidden, UNLESS
+            # they've submitted at least one new share since being hidden.
+            # We compare ckpool's current shares count against the count
+            # captured at hide-time. This works regardless of whether
+            # the worker was online, stale, or offline when hidden:
+            # the only signal that matters is "did they submit a NEW
+            # share after the user clicked Hide?"
+            hidden_meta = hidden.get(workername)
+            if hidden_meta is not None:
+                shares_at_hide = (
+                    hidden_meta.get("shares")
+                    if isinstance(hidden_meta, dict)
+                    else None
+                )
+                hidden_at_ts = (
+                    hidden_meta.get("ts")
+                    if isinstance(hidden_meta, dict)
+                    else hidden_meta  # legacy: scalar ts
+                )
+                current_shares = int(w.get("shares", 0) or 0)
+                # Two unhide signals (either is enough):
+                #   1. shares_count grew since hide  (most reliable)
+                #   2. lastshare timestamp is newer than hide_at_ts
+                #      (handles legacy entries that don't have shares_at_hide)
+                came_back = False
+                if shares_at_hide is not None and current_shares > shares_at_hide:
+                    came_back = True
+                elif hidden_at_ts is not None and last > hidden_at_ts:
+                    came_back = True
+                if came_back:
+                    auto_unhidden.append(workername)
+                else:
+                    continue
+
+            try:
+                ckpool_best = float(w.get("bestshare", 0) or w.get("bestever", 0) or 0)
+            except (TypeError, ValueError):
+                ckpool_best = 0.0
+
+            # Apply soft-reset: if the worker has a baseline with a
+            # reset_snapshot, only show ckpool's bestshare if it's now
+            # greater than the snapshot. Otherwise the displayed Best
+            # is 0 — the user's reset hasn't been "beaten" yet.
+            entry = baselines.get(workername) or {}
+            snap = float(entry.get("reset_snapshot", 0) or 0)
+            displayed_best = ckpool_best if ckpool_best > snap else 0.0
+
             out.append({
-                "id": workername,           # full address.workername; used in form actions
-                "name": display,            # short name for display
+                "id": workername,
+                "name": display,
                 "status": worker_status(age),
                 "age_s": age,
                 "age_human": humanise_age(age),
@@ -506,8 +591,16 @@ def get_workers() -> list[dict]:
                     w.get("hashrate1d") or w.get("hashrate24hr")
                 ),
                 "shares": w.get("shares", 0),
-                "best_share": humanise_diff(best),
+                "best_share": humanise_diff(displayed_best) if displayed_best > 0 else "—",
             })
+
+    # Persist any auto-unhidden workers.
+    if auto_unhidden:
+        with _state_lock:
+            state = _load_baselines()
+            for wid in auto_unhidden:
+                state.get("hidden", {}).pop(wid, None)
+            _save_baselines(state)
 
     rank = {"online": 0, "stale": 1, "offline": 2}
     out.sort(key=lambda w: (rank.get(w["status"], 3), w["age_s"] if w["age_s"] is not None else 1e12))
@@ -809,6 +902,7 @@ def _check_and_fire(now_ts: int) -> None:
     with _state_lock:
         state = _load_baselines()
         workers = state["workers"]
+        hidden = state.get("hidden", {})
         changed = False
 
         for path in glob(os.path.join(WORKERS_DIR, "*")):
@@ -831,6 +925,32 @@ def _check_and_fire(now_ts: int) -> None:
                 workername = w.get("workername", "")
                 if not workername or not WORKER_ID_RE.match(workername):
                     continue
+
+                # Skip hidden workers UNLESS they've come back online
+                # since being hidden. Same logic as get_workers (shares
+                # count growth, or lastshare past hide-ts as a fallback).
+                hidden_meta = hidden.get(workername)
+                if hidden_meta is not None:
+                    shares_at_hide = (
+                        hidden_meta.get("shares")
+                        if isinstance(hidden_meta, dict)
+                        else None
+                    )
+                    hidden_at_ts = (
+                        hidden_meta.get("ts")
+                        if isinstance(hidden_meta, dict)
+                        else hidden_meta
+                    )
+                    cur_shares = int(w.get("shares", 0) or 0)
+                    last = int(w.get("lastshare", 0) or 0)
+                    came_back = False
+                    if shares_at_hide is not None and cur_shares > shares_at_hide:
+                        came_back = True
+                    elif hidden_at_ts is not None and last > hidden_at_ts:
+                        came_back = True
+                    if not came_back:
+                        continue
+
                 try:
                     current = float(w.get("bestshare", 0) or w.get("bestever", 0) or 0)
                 except (TypeError, ValueError):
@@ -1109,27 +1229,52 @@ def set_payout():
 
 @app.route("/workers/forget", methods=["POST"])
 def forget_worker():
-    """In solo mode, ckpool keeps one file per BCH address with a nested
-    worker array. There's no per-worker file to delete — workers come and
-    go inside that array. So 'forget' here drops just our baseline entry
-    for that workername; the worker disappears from the dashboard until
-    it submits another share (which writes a new entry into the user
-    file's worker array)."""
+    """Hide a worker from the dashboard. Stores the worker name + the
+    shares-count at hide time + the unix ts in best_baselines.json.
+    The dashboard's get_workers() filters this worker out on every poll
+    UNTIL the worker submits at least one new share (shares count grows
+    above the hide-time count) — at which point it auto-unhides.
+
+    Why not just delete it: ckpool stores workers nested inside the
+    user file (one file per BCH address). There's no per-worker file
+    to delete; ckpool would just rewrite it on its next flush. The
+    only honest implementation is dashboard-side filtering."""
     name = unquote((request.form.get("name") or request.args.get("name") or "").strip())
     if not name or not WORKER_ID_RE.match(name):
         abort(400, "invalid worker name")
 
+    now = int(time.time())
+    # Capture the worker's current shares count so auto-unhide knows
+    # what counts as "a new share submitted after hiding".
+    current_shares = 0
+    if "." in name:
+        addr = name.split(".", 1)[0]
+        path = os.path.join(WORKERS_DIR, addr)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                user_data = _load_json_loose(f.read()) or {}
+            for w in (user_data.get("worker") or []):
+                if isinstance(w, dict) and w.get("workername") == name:
+                    current_shares = int(w.get("shares", 0) or 0)
+                    break
+        except OSError:
+            pass
+
     with _state_lock:
         state = _load_baselines()
-        had_baseline = state["workers"].pop(name, None) is not None
-        if had_baseline:
-            _save_baselines(state)
+        # Drop baseline so a returning worker is treated as fresh.
+        state["workers"].pop(name, None)
+        # Mark as hidden with both the ts and the share count snapshot.
+        state.setdefault("hidden", {})[name] = {
+            "ts": now,
+            "shares": current_shares,
+        }
+        _save_baselines(state)
 
     wname = name.split(".", 1)[1] if "." in name else name
     flash(
-        f"Forgot worker {wname}'s baseline. ckpool still tracks it inside its address's "
-        "user file — it'll reappear on the dashboard if it submits more shares. "
-        "Use 'Wipe all stats' on the pool card if you want to fully reset.",
+        f"Hid worker {wname} from the dashboard. "
+        "It'll automatically reappear if it submits another share.",
         "ok",
     )
     return redirect(url_for("index"))
@@ -1137,10 +1282,29 @@ def forget_worker():
 
 @app.route("/best/reset", methods=["POST"])
 def reset_best():
-    """Legacy endpoint — kept for backward compat with any old bookmarked
-    URLs or saved page states. Forwards to /stats/reset, which is the
-    single canonical reset action now."""
-    return reset_stats()
+    """Soft reset for a single worker — no miner blip, no ckpool restart.
+
+    Records ckpool's current bestshare for this worker as the
+    `reset_snapshot`, which makes the dashboard hide the Best column
+    until ckpool reports a value above the snapshot. The miner stays
+    connected; ckpool's underlying state is not touched.
+
+    For pool-wide reset (clearing all workers AND restarting ckpool to
+    zero its in-memory accepted-shares + bestshare counters), use
+    /stats/reset with name=__pool__.
+    """
+    name = (request.form.get("name") or "").strip()
+    if not name or not WORKER_ID_RE.match(name):
+        abort(400, "invalid worker name")
+
+    reset_baseline(name)
+
+    wname = name.split(".", 1)[1] if "." in name else name
+    flash(
+        f"Reset best for {wname}. The Best column will stay blank until a new high arrives.",
+        "ok",
+    )
+    return redirect(url_for("index"))
 
 
 def _safe_remove(path: str, base_dir: str) -> bool:

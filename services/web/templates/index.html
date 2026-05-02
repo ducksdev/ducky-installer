@@ -432,18 +432,16 @@
                         {% if not public %}
                         <td>
                           <div class="row-actions">
-                            <form method="post" action="{{ url_for('reset_stats') }}" style="display: inline;"
-                                  onsubmit="return confirm('Reset stats for {{ w.name }}?\n\nThis restarts ckpool, which clears the displayed share count, hashrate and best share for this address. Miners briefly disconnect (~5–10s) and reconnect automatically.\n\nThis cannot be undone.');">
+                            <form method="post" action="{{ url_for('reset_best') }}" style="display: inline;"
+                                  onsubmit="return confirm('Reset Best for {{ w.name }}?\n\nThe Best column will go to zero. New shares will rebuild the Best from there. Miner stays connected, no blip.');">
                               <input type="hidden" name="name" value="{{ w.id }}">
-                              <button type="submit" class="ghost danger" title="Reset stats (restarts ckpool)">Reset</button>
+                              <button type="submit" class="ghost" title="Soft reset — no miner blip">Reset</button>
                             </form>
-                            {% if w.status == 'offline' %}
-                              <form method="post" action="{{ url_for('forget_worker') }}" style="display: inline;"
-                                    onsubmit="return confirm('Forget worker {{ w.name }}?\n\nDrops its baseline so it disappears from the dashboard. Reappears the moment it submits another share. No miner blip.');">
-                                <input type="hidden" name="name" value="{{ w.id }}">
-                                <button type="submit" class="ghost">Forget</button>
-                              </form>
-                            {% endif %}
+                            <form method="post" action="{{ url_for('forget_worker') }}" style="display: inline;"
+                                  onsubmit="return confirm('Hide worker {{ w.name }}?\n\nThe worker will disappear from the dashboard. It auto-reappears if it submits a new share. Miner stays connected, no blip.');">
+                              <input type="hidden" name="name" value="{{ w.id }}">
+                              <button type="submit" class="ghost" title="Hide from dashboard (auto-unhides if worker submits a new share)">Hide</button>
+                            </form>
                           </div>
                         </td>
                         {% endif %}
@@ -708,18 +706,17 @@
 
   function workerActions(w) {
     if (PUBLIC_VIEW) return '';
-    const reset = `<form method="post" action="/stats/reset" style="display: inline;"
-                          onsubmit="return confirm('Reset stats for ${escapeHtml(w.name)}?\\n\\nThis restarts ckpool, which clears the displayed share count, hashrate and best share for this address. Miners briefly disconnect (~5–10s) and reconnect automatically.\\n\\nThis cannot be undone.');">
+    const reset = `<form method="post" action="/best/reset" style="display: inline;"
+                          onsubmit="return confirm('Reset Best for ${escapeHtml(w.name)}?\\n\\nThe Best column will go to zero. New shares will rebuild the Best from there. Miner stays connected, no blip.');">
                      <input type="hidden" name="name" value="${escapeHtml(w.id)}">
-                     <button type="submit" class="ghost danger" title="Reset stats (restarts ckpool)">Reset</button>
+                     <button type="submit" class="ghost" title="Soft reset — no miner blip">Reset</button>
                    </form>`;
-    const forget = w.status === 'offline'
-      ? `<form method="post" action="/workers/forget" style="display: inline;"
-                onsubmit="return confirm('Forget worker ${escapeHtml(w.name)}?\\n\\nDrops its baseline so it disappears from the dashboard. Reappears the moment it submits another share. No miner blip.');">
-           <input type="hidden" name="name" value="${escapeHtml(w.id)}">
-           <button type="submit" class="ghost">Forget</button>
-         </form>` : '';
-    return reset + forget;
+    const hide = `<form method="post" action="/workers/forget" style="display: inline;"
+                         onsubmit="return confirm('Hide worker ${escapeHtml(w.name)}?\\n\\nThe worker will disappear from the dashboard. It auto-reappears if it submits a new share. Miner stays connected, no blip.');">
+                    <input type="hidden" name="name" value="${escapeHtml(w.id)}">
+                    <button type="submit" class="ghost" title="Hide from dashboard (auto-unhides if worker submits a new share)">Hide</button>
+                  </form>`;
+    return reset + hide;
   }
 
   function renderWorkers(workers) {
