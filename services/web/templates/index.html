@@ -275,6 +275,35 @@
       .miner-cards { display: flex; }
     }
 
+    /* ── duck pond stage indicator ─────────────────────────────── */
+    /* Compact variant for the desktop table (under the worker name) */
+    .pond-mini {
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      font-size: 0.72rem; color: var(--muted);
+      margin-top: 0.15rem;
+    }
+    .pond-mini svg { width: 28px; height: 14px; flex-shrink: 0; }
+    .pond-mini .pond-label { font-weight: 500; }
+    /* Full variant for the mobile card (between name and stats) */
+    .pond-full {
+      display: flex; align-items: center; gap: 0.6rem;
+      background: linear-gradient(180deg, transparent 0%, rgba(91,138,166,0.06) 100%);
+      border-radius: 6px; padding: 0.4rem 0.5rem;
+      margin: 0.4rem 0;
+    }
+    .pond-full svg { width: 80px; height: 28px; flex-shrink: 0; }
+    .pond-full .pond-label {
+      font-size: 0.78rem; color: var(--fg); font-weight: 500;
+    }
+    .pond-full .pond-flavor {
+      font-size: 0.72rem; color: var(--muted); font-style: italic;
+      display: block; margin-top: 0.1rem;
+    }
+    .pond-full .pond-pct {
+      margin-left: auto; font-family: ui-monospace, monospace;
+      font-size: 0.7rem; color: var(--muted);
+    }
+
     /* ── blocks ────────────────────────────────────────────────── */
     .blocks-empty {
       text-align: center; padding: 0.5rem 0;
@@ -419,7 +448,15 @@
                   <tbody>
                     {% for w in workers %}
                       <tr class="{{ w.status }}">
-                        <td class="worker-name">{{ w.name }}</td>
+                        <td class="worker-name">
+                          {{ w.name }}
+                          {% if w.stage_level and w.stage_level > 0 %}
+                            <div class="pond-mini">
+                              {{ pond_svg(w.stage_level) | safe }}
+                              <span class="pond-label">{{ w.stage_emoji }} {{ w.stage_label }}</span>
+                            </div>
+                          {% endif %}
+                        </td>
                         <td>
                           {% if w.status == 'online' %}<span class="pill ok">Online</span>
                           {% elif w.status == 'stale' %}<span class="pill warn">Stale</span>
@@ -459,6 +496,18 @@
                         {% elif w.status == 'stale' %}<span class="pill warn">Stale</span>
                         {% else %}<span class="pill dim">Offline</span>{% endif %}
                       </div>
+                      {% if w.stage_level and w.stage_level > 0 %}
+                        <div class="pond-full">
+                          {{ pond_svg(w.stage_level) | safe }}
+                          <div>
+                            <span class="pond-label">{{ w.stage_emoji }} {{ w.stage_label }}</span>
+                            <span class="pond-flavor">{{ w.stage_flavor }}</span>
+                          </div>
+                          {% if w.progress_pct and w.progress_pct > 0 %}
+                            <span class="pond-pct">{{ "%.4f"|format(w.progress_pct) }}%</span>
+                          {% endif %}
+                        </div>
+                      {% endif %}
                       <div class="stats-row">
                         <div>Hashrate<br><span class="v">{{ w.hashrate_1m }}</span></div>
                         <div>Best<br><span class="v">{{ w.best_share }}</span></div>
@@ -704,6 +753,80 @@
       <p class="help">Latest: ${link}${worker}</p>`;
   }
 
+  // ───── duck pond stage SVG ─────
+  // Renders a small pond with a duck riding waves whose amplitude
+  // scales with the worker's current stage level (0..6). At Royal
+  // (level 6), the duck wears a crown.
+  function pondSVG(level, opts) {
+    opts = opts || {};
+    const w = opts.width || 80;
+    const h = opts.height || 28;
+    const cy = h / 2 + 2;        // baseline of waves
+    // Wave amplitude scales with stage level.
+    const amp = [0, 1.5, 3, 5, 7, 9, 6][level] || 0;
+    // Build a sinusoidal path across width.
+    const steps = Math.max(8, Math.floor(w / 4));
+    let d = `M0 ${cy.toFixed(1)}`;
+    for (let i = 1; i <= steps; i++) {
+      const x = (w * i) / steps;
+      const y = cy - Math.sin((i / steps) * Math.PI * 4) * amp;
+      d += ` L${x.toFixed(1)} ${y.toFixed(1)}`;
+    }
+    d += ` L${w} ${h} L0 ${h} Z`;
+
+    // Duck position: centre at low stages, riding the leftmost crest at high.
+    const duckX = level >= 4 ? w * 0.62 : w * 0.5;
+    const duckSize = h * 0.55;
+    const duckY = cy - amp * 0.5 - duckSize * 0.35;
+
+    // Optional bread for "Loaf alert" / Royal
+    const breadX = w - duckSize - 2;
+    const breadY = cy - amp - duckSize * 0.4;
+    const showBread = level >= 5;
+    // Optional crown for Royal
+    const showCrown = level >= 6;
+
+    return `
+      <svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs>
+          <linearGradient id="pondg-${level}" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0" stop-color="#5b8aa6" stop-opacity="0.55"/>
+            <stop offset="1" stop-color="#2c4458" stop-opacity="0.85"/>
+          </linearGradient>
+        </defs>
+        <path d="${d}" fill="url(#pondg-${level})"/>
+        <!-- duck body -->
+        <ellipse cx="${duckX}" cy="${duckY + duckSize * 0.35}"
+                 rx="${duckSize * 0.55}" ry="${duckSize * 0.32}"
+                 fill="#f9a825"/>
+        <!-- duck head -->
+        <circle cx="${duckX + duckSize * 0.35}" cy="${duckY + duckSize * 0.05}"
+                r="${duckSize * 0.25}" fill="#f9a825"/>
+        <!-- beak -->
+        <path d="M${duckX + duckSize * 0.55} ${duckY + duckSize * 0.05}
+                 l${duckSize * 0.18} -${duckSize * 0.04}
+                 l-${duckSize * 0.04} ${duckSize * 0.12} z"
+              fill="#c77800"/>
+        <!-- eye -->
+        <circle cx="${duckX + duckSize * 0.42}" cy="${duckY}"
+                r="${duckSize * 0.04}" fill="#0c0e13"/>
+        ${showCrown ? `
+        <!-- crown -->
+        <path d="M${duckX + duckSize * 0.18} ${duckY - duckSize * 0.18}
+                 L${duckX + duckSize * 0.27} ${duckY - duckSize * 0.36}
+                 L${duckX + duckSize * 0.36} ${duckY - duckSize * 0.22}
+                 L${duckX + duckSize * 0.45} ${duckY - duckSize * 0.36}
+                 L${duckX + duckSize * 0.54} ${duckY - duckSize * 0.18} Z"
+              fill="#f9a825" stroke="#c77800" stroke-width="0.5"/>` : ''}
+        ${showBread ? `
+        <!-- bread crumb -->
+        <ellipse cx="${breadX}" cy="${breadY}"
+                 rx="${duckSize * 0.18}" ry="${duckSize * 0.12}"
+                 fill="#c97f3a"/>` : ''}
+      </svg>
+    `;
+  }
+
   function workerActions(w) {
     if (PUBLIC_VIEW) return '';
     const reset = `<form method="post" action="/best/reset" style="display: inline;"
@@ -729,8 +852,11 @@
                  : w.status === 'stale'  ? '<span class="pill warn">Stale</span>'
                  :                          '<span class="pill dim">Offline</span>';
       const actionCell = PUBLIC_VIEW ? '' : `<td><div class="row-actions">${workerActions(w)}</div></td>`;
+      const stage = (w.stage_level || 0) > 0
+        ? `<div class="pond-mini">${pondSVG(w.stage_level)}<span class="pond-label">${w.stage_emoji || ''} ${escapeHtml(w.stage_label || '')}</span></div>`
+        : '';
       return `<tr class="${w.status}">
-        <td class="worker-name">${escapeHtml(w.name)}</td>
+        <td class="worker-name">${escapeHtml(w.name)}${stage}</td>
         <td>${pill}</td>
         <td class="num">${escapeHtml(String(w.hashrate_1m))}</td>
         <td class="num">${fmtInt(w.shares)}</td>
@@ -754,11 +880,25 @@
                  :                          '<span class="pill dim">Offline</span>';
       const actionsRow = PUBLIC_VIEW ? '' :
         `<div class="actions-row">${workerActions(w)}</div>`;
+      const pctText = (w.progress_pct && w.progress_pct > 0)
+        ? `<span class="pond-pct">${Number(w.progress_pct).toFixed(4)}%</span>`
+        : '';
+      const pondBlock = (w.stage_level || 0) > 0
+        ? `<div class="pond-full">
+             ${pondSVG(w.stage_level, {width: 80, height: 28})}
+             <div>
+               <span class="pond-label">${w.stage_emoji || ''} ${escapeHtml(w.stage_label || '')}</span>
+               <span class="pond-flavor">${escapeHtml(w.stage_flavor || '')}</span>
+             </div>
+             ${pctText}
+           </div>`
+        : '';
       return `<div class="miner-card">
         <div class="name-row">
           <span class="name">${escapeHtml(w.name)}</span>
           ${pill}
         </div>
+        ${pondBlock}
         <div class="stats-row">
           <div>Hashrate<span class="v">${escapeHtml(String(w.hashrate_1m))}</span></div>
           <div>Best<span class="v">${fmtDiff(w.best_share)}</span></div>

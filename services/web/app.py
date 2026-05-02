@@ -539,6 +539,10 @@ def get_workers() -> list[dict]:
     now = int(time.time())
     out: list[dict] = []
 
+    # Look up network difficulty once for the Royal-duck stage check.
+    # get_network_difficulty() is cached so this is essentially free.
+    net_diff = get_network_difficulty()
+
     # Load baselines once per call so we can apply the reset_snapshot
     # filter and the hidden-workers filter without hammering disk.
     with _state_lock:
@@ -649,6 +653,13 @@ def get_workers() -> list[dict]:
                 # Reset happened, no new shares seen yet
                 displayed_best = 0.0
 
+            stage = duck_stage(displayed_best, net_diff)
+            progress_pct = (
+                (displayed_best / net_diff * 100.0)
+                if (net_diff and net_diff > 0 and displayed_best > 0)
+                else 0.0
+            )
+
             out.append({
                 "id": workername,
                 "name": display,
@@ -662,6 +673,11 @@ def get_workers() -> list[dict]:
                 ),
                 "shares": w.get("shares", 0),
                 "best_share": humanise_diff(displayed_best) if displayed_best > 0 else "—",
+                "stage_level": stage["level"],
+                "stage_label": stage["label"],
+                "stage_flavor": stage["flavor"],
+                "stage_emoji": stage["emoji"],
+                "progress_pct": progress_pct,
             })
 
     # Persist any auto-unhidden workers.
@@ -895,6 +911,156 @@ def progress_bar(current: float, target: float, width: int = 14) -> str:
     return "▰" * filled + "▱" * (width - filled)
 
 
+# ──────────────────────────── duck stages ────────────────────────────
+#
+# Maps a share's sdiff to a duck-themed stage ("how big is the splash?").
+# Used both on the dashboard (per-worker label + SVG pond) and in the
+# Discord webhook embed (replaces the generic "new best share" copy).
+#
+# Stage thresholds were picked for a typical NerdQAxe-class miner at ~5 TH/s
+# under solo vardiff. At that scale you'd see "Decent splash" a few times
+# per minute, "Big splash" every few minutes, and "Loaf alert" maybe once
+# an hour. The very rare "Royal duck moment" is hit when a share crosses
+# 1% of network difficulty.
+#
+# Each stage carries:
+#   level   : 0..6, ascending (used for sorting / picking SVG stage art)
+#   label   : short title for cards/embeds
+#   flavor  : one-liner of duck microcopy
+#   color   : RGB int for Discord embed border (warm pond colours)
+#   emoji   : single character for inline use
+def duck_stage(sdiff: float, net_diff: float | None = None) -> dict:
+    """Return the duck stage for this share. If net_diff is provided
+    and the share crosses 1% of network difficulty, we promote it to
+    'Royal duck' regardless of raw sdiff."""
+    if sdiff <= 0:
+        return {
+            "level": 0,
+            "label": "Empty pond",
+            "flavor": "Duck waiting patiently…",
+            "color": 0x5b6675,
+            "emoji": "🦆",
+        }
+
+    # Royal-duck override when share is a large fraction of network diff.
+    if net_diff and net_diff > 0 and (sdiff / net_diff) >= 0.01:
+        return {
+            "level": 6,
+            "label": "Royal duck moment",
+            "flavor": "Approaching the bakery!",
+            "color": 0xf9a825,
+            "emoji": "👑",
+        }
+
+    if sdiff < 100_000:
+        return {
+            "level": 1,
+            "label": "Light ripples",
+            "flavor": "Tiny crumbs landing.",
+            "color": 0x5b8aa6,
+            "emoji": "💧",
+        }
+    if sdiff < 1_000_000:
+        return {
+            "level": 2,
+            "label": "Decent splash",
+            "flavor": "The duck noticed!",
+            "color": 0x4a90a4,
+            "emoji": "🌊",
+        }
+    if sdiff < 10_000_000:
+        return {
+            "level": 3,
+            "label": "Big splash",
+            "flavor": "Other ducks paddling over.",
+            "color": 0xc77800,
+            "emoji": "🦆",
+        }
+    if sdiff < 100_000_000:
+        return {
+            "level": 4,
+            "label": "Huge wave",
+            "flavor": "Whole flock arriving!",
+            "color": 0xf9a825,
+            "emoji": "🌪",
+        }
+    return {
+        "level": 5,
+        "label": "Loaf alert",
+        "flavor": "Duck spotted a loaf!",
+        "color": 0xff6b00,
+        "emoji": "🍞",
+    }
+
+
+def pond_svg(level: int, width: int = 80, height: int = 28) -> str:
+    """Render a small duck-on-pond SVG for a given stage level (0..6).
+    Used by Jinja templates for server-side first paint. The JS-side
+    pondSVG() in templates/index.html mirrors this algorithm so that
+    re-renders (every 10s poll) look identical to the initial load."""
+    import math
+    cy = height / 2 + 2
+    # amp scales with stage level (matches JS table)
+    amp_table = [0, 1.5, 3, 5, 7, 9, 6]
+    amp = amp_table[level] if 0 <= level < len(amp_table) else 0
+    # Build sinusoidal wave path
+    steps = max(8, width // 4)
+    pts = [f"M0 {cy:.1f}"]
+    for i in range(1, steps + 1):
+        x = (width * i) / steps
+        y = cy - math.sin((i / steps) * math.pi * 4) * amp
+        pts.append(f"L{x:.1f} {y:.1f}")
+    pts.append(f"L{width} {height} L0 {height} Z")
+    d = " ".join(pts)
+
+    duck_x = width * 0.62 if level >= 4 else width * 0.5
+    duck_size = height * 0.55
+    duck_y = cy - amp * 0.5 - duck_size * 0.35
+
+    show_bread = level >= 5
+    show_crown = level >= 6
+    bread_x = width - duck_size - 2
+    bread_y = cy - amp - duck_size * 0.4
+
+    crown = ""
+    if show_crown:
+        crown = (
+            f'<path d="M{duck_x + duck_size * 0.18} {duck_y - duck_size * 0.18}'
+            f' L{duck_x + duck_size * 0.27} {duck_y - duck_size * 0.36}'
+            f' L{duck_x + duck_size * 0.36} {duck_y - duck_size * 0.22}'
+            f' L{duck_x + duck_size * 0.45} {duck_y - duck_size * 0.36}'
+            f' L{duck_x + duck_size * 0.54} {duck_y - duck_size * 0.18} Z"'
+            f' fill="#f9a825" stroke="#c77800" stroke-width="0.5"/>'
+        )
+    bread = ""
+    if show_bread:
+        bread = (
+            f'<ellipse cx="{bread_x}" cy="{bread_y}"'
+            f' rx="{duck_size * 0.18}" ry="{duck_size * 0.12}"'
+            f' fill="#c97f3a"/>'
+        )
+
+    return (
+        f'<svg viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">'
+        f'<defs><linearGradient id="pondg-{level}" x1="0" x2="0" y1="0" y2="1">'
+        f'<stop offset="0" stop-color="#5b8aa6" stop-opacity="0.55"/>'
+        f'<stop offset="1" stop-color="#2c4458" stop-opacity="0.85"/>'
+        f'</linearGradient></defs>'
+        f'<path d="{d}" fill="url(#pondg-{level})"/>'
+        f'<ellipse cx="{duck_x}" cy="{duck_y + duck_size * 0.35}"'
+        f' rx="{duck_size * 0.55}" ry="{duck_size * 0.32}" fill="#f9a825"/>'
+        f'<circle cx="{duck_x + duck_size * 0.35}" cy="{duck_y + duck_size * 0.05}"'
+        f' r="{duck_size * 0.25}" fill="#f9a825"/>'
+        f'<path d="M{duck_x + duck_size * 0.55} {duck_y + duck_size * 0.05}'
+        f' l{duck_size * 0.18} -{duck_size * 0.04}'
+        f' l-{duck_size * 0.04} {duck_size * 0.12} z" fill="#c77800"/>'
+        f'<circle cx="{duck_x + duck_size * 0.42}" cy="{duck_y}"'
+        f' r="{duck_size * 0.04}" fill="#0c0e13"/>'
+        f'{crown}{bread}'
+        f'</svg>'
+    )
+
+
 def _post_discord(content: str | None, embeds: list[dict] | None = None) -> tuple[bool, str]:
     s = load_settings()
     url = s["discord"]["webhook_url"]
@@ -922,16 +1088,24 @@ def _build_best_share_embed(
     net_diff: float | None,
     ts: int,
 ) -> dict:
-    """Build the rich AxeBCH-style "new best share" embed."""
-    # Bitcoin Cash logo. crypto-logo.com is a CDN built for embedding,
-    # serves 128x128 transparent PNG which is the ideal Discord thumbnail size.
-    BCH_LOGO = "https://cdn.crypto-logo.com/logos/bitcoin-cash-bch/128x128/transparent.png"
+    """Build the duck-themed "new best share" embed.
+
+    The title + description vary with stage (Empty pond → Royal duck);
+    the structured fields preserve the actual numbers. Colour varies
+    with stage so the embed visually escalates as splashes get bigger.
+    """
+    stage = duck_stage(current, net_diff)
 
     fields = [
         {"name": "🎯 Worker",     "value": f"**{worker_name}**", "inline": True},
         {"name": "💎 Best Share", "value": humanise_diff(current), "inline": True},
     ]
-    description_lines = [f"**{worker_name}** just hit a new best share!"]
+
+    description_lines = [
+        f"*{stage['flavor']}*",
+        "",
+        f"**{worker_name}** just made a {humanise_diff(current)} share.",
+    ]
 
     if net_diff and net_diff > 0:
         pct = (current / net_diff) * 100
@@ -942,11 +1116,9 @@ def _build_best_share_embed(
             "inline": True,
         })
         description_lines.append("")
-        description_lines.append("📊 **Progress to Block**")
-        description_lines.append(f"`{bar}`  **{pct:.2f}%**")
+        description_lines.append("🍞 **Progress to bread**")
+        description_lines.append(f"`{bar}`  **{pct:.4f}%**")
     else:
-        # No network diff available — still show a friendly note instead of
-        # a broken progress bar.
         fields.append({
             "name": "📈 Block Diff",
             "value": "—",
@@ -954,11 +1126,10 @@ def _build_best_share_embed(
         })
 
     return {
-        "title": "🦆 New best share! (BCH)",
+        "title": f"{stage['emoji']} {stage['label']}!",
         "description": "\n".join(description_lines),
-        "color": 0xF9A825,
+        "color": stage["color"],
         "fields": fields,
-        "thumbnail": {"url": BCH_LOGO},
         "footer": {"text": "Ducky Pool · Solo BCH"},
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts)),
     }
@@ -1832,6 +2003,10 @@ def test_webhook():
 
 _start_watcher()
 _start_share_tailer()
+
+# Make the pond renderer available in Jinja templates so the
+# server-rendered initial paint matches the JS re-render.
+app.jinja_env.globals["pond_svg"] = pond_svg
 
 
 if __name__ == "__main__":
