@@ -975,7 +975,7 @@ def request_service_restart(service: str) -> tuple[bool, str]:
         return False, f"could not write marker: {exc}"
 
 
-
+def get_node_status() -> dict:
     try:
         info = rpc("getblockchaininfo")
         net = rpc("getnetworkinfo")
