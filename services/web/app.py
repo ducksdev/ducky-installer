@@ -88,6 +88,15 @@ WATCHER_INTERVAL = int(os.environ.get("WATCHER_INTERVAL", "15"))
 WEBHOOK_MIN_INTERVAL = int(os.environ.get("WEBHOOK_MIN_INTERVAL", "60"))
 WEBHOOK_TIMEOUT = 10
 
+# ckpool with -L (--log-shares) writes one JSON line per accepted share to:
+#   <CKPOOL_LOG_ROOT>/<block_height_in_hex>/<workinfo_id_hex>.sharelog
+# Each line has fields: workername, sdiff (share difficulty), result, errn,
+# createdate ("unix_ts,microseconds"). The web container mounts ckpool's
+# /var/log/ckpool as /pool-logs (rw=true on the worker subdir for cleanup,
+# but we only read share logs).
+CKPOOL_LOG_ROOT = os.environ.get("CKPOOL_LOG_ROOT", "/pool-logs")
+SHARE_TAIL_INTERVAL = int(os.environ.get("SHARE_TAIL_INTERVAL", "2"))
+
 LEGACY_BCH_RE = re.compile(r"^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$")
 CASHADDR_RE = re.compile(r"^(bitcoincash:)?[qp][a-z0-9]{40,}$", re.IGNORECASE)
 # File on disk in /users is just the Base58 BCH address.
@@ -1156,6 +1165,243 @@ def _build_block_found_embed(block: dict, ts: int) -> dict:
 
 _last_history_ts = 0
 
+# ──────────────────────────── share log tailer ────────────────────────────
+#
+# ckpool's -L flag writes one JSON line per accepted share to files under
+# CKPOOL_LOG_ROOT. The tree shape is:
+#
+#   /pool-logs/<block_height_hex>/<workinfo_id_hex>.sharelog
+#
+# Each line contains: workername, sdiff (the actual share difficulty),
+# result (true/false), createdate ("unix_ts,microseconds"), and others.
+#
+# This tailer:
+#   - Discovers the active block-height directory by mtime
+#   - Tracks an offset per file so we resume from where we left off
+#   - When ckpool rolls over to a new block, the new directory appears;
+#     we just start tailing the new one and forget the old offsets
+#   - For each share line, updates post_reset_best for the worker if
+#     sdiff exceeds it. Fires a Discord webhook for each new high
+#     (rate-limited via the existing WEBHOOK_MIN_INTERVAL).
+#
+# State on disk (in /shared/best_baselines.json) per worker:
+#   post_reset_best : highest sdiff seen since the last reset_baseline.
+#                     0 means no shares observed since reset.
+# This is the value get_workers prefers when deciding what to display.
+
+# In-memory file-tail offsets. Keyed by absolute path. Reset whenever
+# we detect a directory roll-over (new block height).
+_share_tail_offsets: dict[str, int] = {}
+_share_tail_dir: str | None = None  # currently-active height dir
+_share_tail_lock = threading.Lock()
+
+
+def _find_active_share_dir() -> str | None:
+    """Return the path of the height-directory that ckpool is currently
+    writing into, or None if no share dir exists yet. Heuristic: it's
+    the immediate subdirectory of CKPOOL_LOG_ROOT whose mtime is newest,
+    EXCLUDING the well-known ckpool-internal dirs (pool, users)."""
+    if not os.path.isdir(CKPOOL_LOG_ROOT):
+        return None
+    best_path = None
+    best_mtime = -1.0
+    for name in os.listdir(CKPOOL_LOG_ROOT):
+        if name in ("pool", "users") or name.startswith("."):
+            continue
+        full = os.path.join(CKPOOL_LOG_ROOT, name)
+        if not os.path.isdir(full):
+            continue
+        try:
+            mtime = os.path.getmtime(full)
+        except OSError:
+            continue
+        if mtime > best_mtime:
+            best_mtime = mtime
+            best_path = full
+    return best_path
+
+
+def _tail_share_line(line: str, now_ts: int) -> None:
+    """Parse one share-log JSON line and update post_reset_best +
+    fire a Discord webhook if the share is a new post-reset high.
+    Silently ignores malformed lines, rejected shares, and shares
+    for workers we don't have a baseline for yet (those baselines
+    come from the existing minute-aggregate watcher loop)."""
+    line = line.strip()
+    if not line or not line.startswith("{"):
+        return
+    try:
+        share = json.loads(line)
+    except json.JSONDecodeError:
+        return
+
+    # Only care about accepted shares. Rejected shares (errn != 0 or
+    # result != true) shouldn't bump the user's best.
+    if not share.get("result"):
+        return
+    if share.get("errn", 0) != 0:
+        return
+
+    workername = share.get("workername", "")
+    if not workername or not WORKER_ID_RE.match(workername):
+        return
+
+    try:
+        sdiff = float(share.get("sdiff", 0) or 0)
+    except (TypeError, ValueError):
+        return
+    if sdiff <= 0:
+        return
+
+    # Update the worker's post_reset_best. We do this transactionally
+    # under the existing _state_lock so we don't race with the user
+    # clicking Reset (which writes a fresh entry) or the minute watcher
+    # (which updates `best`).
+    with _state_lock:
+        state = _load_baselines()
+        workers = state["workers"]
+        hidden = state.get("hidden", {})
+        entry = workers.get(workername)
+        if entry is None:
+            # Unknown worker — let the minute watcher seed its baseline
+            # first. We'll start tracking on the next share after that.
+            return
+
+        # If hidden, stay hidden until they come back online (which the
+        # minute watcher decides). Don't fire webhooks meanwhile.
+        if workername in hidden:
+            return
+
+        prev_post = float(entry.get("post_reset_best", 0) or 0)
+        prev_best = float(entry.get("best", 0) or 0)
+        last_sent = int(entry.get("last_sent_ts", 0) or 0)
+
+        # Only act if this share is a new post-reset high.
+        if sdiff <= prev_post:
+            return
+
+        entry["post_reset_best"] = sdiff
+        # Also track all-time best so the minute watcher's first-sight
+        # rule continues to work (and so duplicate webhooks are avoided
+        # if the post_reset best happens to equal the all-time best).
+        if sdiff > prev_best:
+            entry["best"] = sdiff
+
+        # Fire webhook if rate limit allows.
+        s = load_settings()
+        webhook_url = s["discord"]["webhook_url"]
+        will_fire = bool(webhook_url) and (now_ts - last_sent) >= WEBHOOK_MIN_INTERVAL
+
+        workers[workername] = entry
+        _save_baselines(state)
+
+    # Webhook outside the state lock so we don't hold it during HTTP.
+    if will_fire:
+        display = workername.split(".", 1)[1] if "." in workername else workername
+        net_diff = get_network_difficulty()
+        ok, _msg = _post_discord(
+            content=None,
+            embeds=[_build_best_share_embed(
+                worker_name=display,
+                current=sdiff,
+                net_diff=net_diff,
+                ts=now_ts,
+            )],
+        )
+        if ok:
+            with _state_lock:
+                state = _load_baselines()
+                e = state["workers"].get(workername)
+                if e is not None:
+                    e["last_sent_ts"] = now_ts
+                    state["workers"][workername] = e
+                    _save_baselines(state)
+
+
+def _share_tail_tick() -> None:
+    """One iteration of the share-log tailer. Discovers the active
+    block-height directory, tails any new bytes appended to the
+    .sharelog files in it, and pushes each line through
+    _tail_share_line. Resets offsets if the active dir changes."""
+    global _share_tail_dir, _share_tail_offsets
+
+    active = _find_active_share_dir()
+    if active is None:
+        return
+
+    with _share_tail_lock:
+        if active != _share_tail_dir:
+            # Block changed (or first run) — drop offsets for the old dir
+            # so we start each new block fresh. This is safe: shares from
+            # the previous block were already processed during their
+            # block's lifetime; we don't replay history.
+            _share_tail_offsets = {}
+            _share_tail_dir = active
+
+    now_ts = int(time.time())
+    try:
+        names = os.listdir(active)
+    except OSError:
+        return
+
+    for name in names:
+        if not name.endswith(".sharelog"):
+            continue
+        path = os.path.join(active, name)
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            continue
+
+        offset = _share_tail_offsets.get(path, 0)
+        if size <= offset:
+            continue   # nothing new
+
+        # Read from offset to current end. ckpool writes one JSON line
+        # per share; we only act on complete lines (ending with \n).
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                f.seek(offset)
+                chunk = f.read(size - offset)
+        except OSError:
+            continue
+        if not chunk:
+            continue
+
+        # Find the last newline so we don't process a partial trailing line.
+        last_nl = chunk.rfind("\n")
+        if last_nl < 0:
+            # No complete line yet — wait for more.
+            continue
+        complete = chunk[: last_nl + 1]
+        new_offset = offset + len(complete.encode("utf-8"))
+
+        for raw in complete.splitlines():
+            try:
+                _tail_share_line(raw, now_ts)
+            except Exception as exc:  # noqa: BLE001
+                app.logger.exception("share tail line failed: %s", exc)
+
+        with _share_tail_lock:
+            _share_tail_offsets[path] = new_offset
+
+
+def _share_tail_loop() -> None:
+    while True:
+        try:
+            _share_tail_tick()
+        except Exception as exc:  # noqa: BLE001
+            app.logger.exception("share tail tick failed: %s", exc)
+        time.sleep(SHARE_TAIL_INTERVAL)
+
+
+def _start_share_tailer() -> None:
+    t = threading.Thread(target=_share_tail_loop, name="ducky-share-tail", daemon=True)
+    t.start()
+
+
+# ──────────────────────────── main watcher loop ────────────────────────────
+
 
 def _watcher_loop() -> None:
     global _last_history_ts
@@ -1585,6 +1831,7 @@ def test_webhook():
 
 
 _start_watcher()
+_start_share_tailer()
 
 
 if __name__ == "__main__":
