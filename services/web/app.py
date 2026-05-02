@@ -660,6 +660,23 @@ def get_workers() -> list[dict]:
                 else 0.0
             )
 
+            # Log-scaled duck position 0..1 along the pond. Linear
+            # share/target would pin the duck at the left edge for
+            # virtually all share difficulties (a 1M share against an
+            # 800G target is 0.0001%). log(share)/log(target) gives
+            # the duck room to move: a 1M share lands ~25%, 1B lands
+            # ~67%, 100B lands ~90%, an actual block-difficulty share
+            # lands at the far right next to the bread.
+            if displayed_best > 0 and net_diff and net_diff > 1:
+                import math
+                try:
+                    progress01 = math.log(max(2.0, displayed_best)) / math.log(net_diff)
+                except (ValueError, ZeroDivisionError):
+                    progress01 = 0.0
+                progress01 = max(0.0, min(1.0, progress01))
+            else:
+                progress01 = 0.0
+
             out.append({
                 "id": workername,
                 "name": display,
@@ -678,6 +695,7 @@ def get_workers() -> list[dict]:
                 "stage_flavor": stage["flavor"],
                 "stage_emoji": stage["emoji"],
                 "progress_pct": progress_pct,
+                "progress01": progress01,
             })
 
     # Persist any auto-unhidden workers.
@@ -993,17 +1011,29 @@ def duck_stage(sdiff: float, net_diff: float | None = None) -> dict:
     }
 
 
-def pond_svg(level: int, width: int = 80, height: int = 28) -> str:
-    """Render a small duck-on-pond SVG for a given stage level (0..6).
-    Used by Jinja templates for server-side first paint. The JS-side
-    pondSVG() in templates/index.html mirrors this algorithm so that
-    re-renders (every 10s poll) look identical to the initial load."""
+def pond_svg(level: int, width: int = 80, height: int = 28,
+             progress01: float | None = None) -> str:
+    """Render a duck-on-pond SVG.
+
+    level    : stage index 0..6 — controls wave amplitude + crown presence.
+    progress01 : optional 0..1 horizontal duck position. If None, falls
+                 back to a level-based default. Used by the Duck-O-Meter
+                 card to slide the duck visibly toward the bread as
+                 share difficulty climbs (log-scaled).
+
+    The bread loaf is ALWAYS drawn at the right edge — it's the goal,
+    not a tier reward. The duck swims toward it.
+
+    The JS-side pondSVG() in templates/index.html mirrors this algorithm
+    so re-renders (every 10s poll) look identical to the initial load."""
     import math
+
     cy = height / 2 + 2
-    # amp scales with stage level (matches JS table)
+    # Wave amplitude scales with stage level. Higher tiers = bigger waves.
     amp_table = [0, 1.5, 3, 5, 7, 9, 6]
     amp = amp_table[level] if 0 <= level < len(amp_table) else 0
-    # Build sinusoidal wave path
+
+    # Build sinusoidal water surface path.
     steps = max(8, width // 4)
     pts = [f"M0 {cy:.1f}"]
     for i in range(1, steps + 1):
@@ -1013,14 +1043,31 @@ def pond_svg(level: int, width: int = 80, height: int = 28) -> str:
     pts.append(f"L{width} {height} L0 {height} Z")
     d = " ".join(pts)
 
-    duck_x = width * 0.62 if level >= 4 else width * 0.5
     duck_size = height * 0.55
+    # Bread sits at right edge, leaving a small margin.
+    bread_size = duck_size * 0.95
+    bread_x = width - bread_size * 0.55 - 4
+    bread_y = cy - bread_size * 0.4
+
+    # Duck horizontal position. progress01 maps the playable pond width
+    # (between left edge + duck_size and bread_x - duck_size) to 0..1.
+    # If no progress given, fall back to tier-based defaults.
+    left_bound = duck_size * 0.6
+    right_bound = bread_x - bread_size * 0.55 - duck_size * 0.4
+    if progress01 is None:
+        # Tier defaults: 0 = off-screen left (empty pond), 1-3 = drift
+        # left-mid, 4-6 = right side near bread.
+        tier_pos = [-0.2, 0.05, 0.18, 0.34, 0.55, 0.75, 0.92]
+        p = tier_pos[level] if 0 <= level < len(tier_pos) else 0.0
+    else:
+        p = max(0.0, min(1.0, progress01))
+    duck_x = left_bound + (right_bound - left_bound) * p
     duck_y = cy - amp * 0.5 - duck_size * 0.35
 
-    show_bread = level >= 5
     show_crown = level >= 6
-    bread_x = width - duck_size - 2
-    bread_y = cy - amp - duck_size * 0.4
+    # Wake (small ripple lines behind the duck) appears once duck is
+    # actually moving — tier 3+. Subtle, not distracting.
+    show_wake = level >= 3 and p > 0.15
 
     crown = ""
     if show_crown:
@@ -1032,13 +1079,39 @@ def pond_svg(level: int, width: int = 80, height: int = 28) -> str:
             f' L{duck_x + duck_size * 0.54} {duck_y - duck_size * 0.18} Z"'
             f' fill="#f9a825" stroke="#c77800" stroke-width="0.5"/>'
         )
-    bread = ""
-    if show_bread:
-        bread = (
-            f'<ellipse cx="{bread_x}" cy="{bread_y}"'
-            f' rx="{duck_size * 0.18}" ry="{duck_size * 0.12}"'
-            f' fill="#c97f3a"/>'
+
+    wake = ""
+    if show_wake:
+        wake_y = duck_y + duck_size * 0.6
+        wake_start = duck_x - duck_size * 0.55
+        wake = (
+            f'<path d="M{wake_start - duck_size * 0.7} {wake_y}'
+            f' q{duck_size * 0.18} -{duck_size * 0.12}'
+            f' {duck_size * 0.36} 0'
+            f' t{duck_size * 0.36} 0"'
+            f' fill="none" stroke="#aac7d6" stroke-width="0.6"'
+            f' stroke-linecap="round" opacity="0.6"/>'
         )
+
+    # Bread loaf — always drawn. Body is a warm tan ellipse with two darker
+    # diagonal slashes for the classic loaf score marks.
+    bread = (
+        # Loaf body
+        f'<ellipse cx="{bread_x}" cy="{bread_y}"'
+        f' rx="{bread_size * 0.55}" ry="{bread_size * 0.38}"'
+        f' fill="#d18b4e" stroke="#8a4f1f" stroke-width="0.5"/>'
+        # Top crust highlight
+        f'<ellipse cx="{bread_x}" cy="{bread_y - bread_size * 0.12}"'
+        f' rx="{bread_size * 0.4}" ry="{bread_size * 0.15}"'
+        f' fill="#e3a872" opacity="0.7"/>'
+        # Score marks (two diagonal slashes on top)
+        f'<line x1="{bread_x - bread_size * 0.22}" y1="{bread_y - bread_size * 0.18}"'
+        f' x2="{bread_x - bread_size * 0.08}" y2="{bread_y - bread_size * 0.05}"'
+        f' stroke="#8a4f1f" stroke-width="0.6" stroke-linecap="round"/>'
+        f'<line x1="{bread_x + bread_size * 0.04}" y1="{bread_y - bread_size * 0.18}"'
+        f' x2="{bread_x + bread_size * 0.18}" y2="{bread_y - bread_size * 0.05}"'
+        f' stroke="#8a4f1f" stroke-width="0.6" stroke-linecap="round"/>'
+    )
 
     return (
         f'<svg viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">'
@@ -1047,6 +1120,7 @@ def pond_svg(level: int, width: int = 80, height: int = 28) -> str:
         f'<stop offset="1" stop-color="#2c4458" stop-opacity="0.85"/>'
         f'</linearGradient></defs>'
         f'<path d="{d}" fill="url(#pondg-{level})"/>'
+        f'{wake}'
         f'<ellipse cx="{duck_x}" cy="{duck_y + duck_size * 0.35}"'
         f' rx="{duck_size * 0.55}" ry="{duck_size * 0.32}" fill="#f9a825"/>'
         f'<circle cx="{duck_x + duck_size * 0.35}" cy="{duck_y + duck_size * 0.05}"'

@@ -489,7 +489,7 @@
                   </div>
                   <span class="duck-flavor">{{ w.stage_flavor }}</span>
                   <div class="duck-pond">
-                    {{ pond_svg(w.stage_level or 0, 360, 56) | safe }}
+                    {{ pond_svg(w.stage_level or 0, 360, 56, w.progress01 or 0) | safe }}
                   </div>
                   <div class="duck-stats">
                     <span><span class="label">Share</span><span class="v">{{ w.best_share }}</span></span>
@@ -837,10 +837,14 @@
     opts = opts || {};
     const w = opts.width || 80;
     const h = opts.height || 28;
-    const cy = h / 2 + 2;        // baseline of waves
-    // Wave amplitude scales with stage level.
+    const progress01 = (typeof opts.progress01 === 'number')
+      ? Math.max(0, Math.min(1, opts.progress01))
+      : null;
+
+    const cy = h / 2 + 2;
     const amp = [0, 1.5, 3, 5, 7, 9, 6][level] || 0;
-    // Build a sinusoidal path across width.
+
+    // Sinusoidal water surface path
     const steps = Math.max(8, Math.floor(w / 4));
     let d = `M0 ${cy.toFixed(1)}`;
     for (let i = 1; i <= steps; i++) {
@@ -850,17 +854,56 @@
     }
     d += ` L${w} ${h} L0 ${h} Z`;
 
-    // Duck position: centre at low stages, riding the leftmost crest at high.
-    const duckX = level >= 4 ? w * 0.62 : w * 0.5;
     const duckSize = h * 0.55;
+    const breadSize = duckSize * 0.95;
+    const breadX = w - breadSize * 0.55 - 4;
+    const breadY = cy - breadSize * 0.4;
+
+    // Duck position. progress01 (when given) maps the playable pond
+    // to 0..1; otherwise tier-based defaults.
+    const leftBound = duckSize * 0.6;
+    const rightBound = breadX - breadSize * 0.55 - duckSize * 0.4;
+    const tierPos = [-0.2, 0.05, 0.18, 0.34, 0.55, 0.75, 0.92];
+    const p = (progress01 !== null) ? progress01 : (tierPos[level] || 0);
+    const duckX = leftBound + (rightBound - leftBound) * p;
     const duckY = cy - amp * 0.5 - duckSize * 0.35;
 
-    // Optional bread for "Loaf alert" / Royal
-    const breadX = w - duckSize - 2;
-    const breadY = cy - amp - duckSize * 0.4;
-    const showBread = level >= 5;
-    // Optional crown for Royal
     const showCrown = level >= 6;
+    const showWake = level >= 3 && p > 0.15;
+
+    const wake = showWake ? (() => {
+      const wakeY = duckY + duckSize * 0.6;
+      const wakeStart = duckX - duckSize * 0.55;
+      return `<path d="M${wakeStart - duckSize * 0.7} ${wakeY}
+                       q${duckSize * 0.18} -${duckSize * 0.12}
+                         ${duckSize * 0.36} 0
+                       t${duckSize * 0.36} 0"
+                    fill="none" stroke="#aac7d6" stroke-width="0.6"
+                    stroke-linecap="round" opacity="0.6"/>`;
+    })() : '';
+
+    const crown = showCrown ? `
+      <path d="M${duckX + duckSize * 0.18} ${duckY - duckSize * 0.18}
+               L${duckX + duckSize * 0.27} ${duckY - duckSize * 0.36}
+               L${duckX + duckSize * 0.36} ${duckY - duckSize * 0.22}
+               L${duckX + duckSize * 0.45} ${duckY - duckSize * 0.36}
+               L${duckX + duckSize * 0.54} ${duckY - duckSize * 0.18} Z"
+            fill="#f9a825" stroke="#c77800" stroke-width="0.5"/>` : '';
+
+    // Bread loaf — always present. Body + crust highlight + score marks.
+    const bread = `
+      <ellipse cx="${breadX}" cy="${breadY}"
+               rx="${breadSize * 0.55}" ry="${breadSize * 0.38}"
+               fill="#d18b4e" stroke="#8a4f1f" stroke-width="0.5"/>
+      <ellipse cx="${breadX}" cy="${breadY - breadSize * 0.12}"
+               rx="${breadSize * 0.4}" ry="${breadSize * 0.15}"
+               fill="#e3a872" opacity="0.7"/>
+      <line x1="${breadX - breadSize * 0.22}" y1="${breadY - breadSize * 0.18}"
+            x2="${breadX - breadSize * 0.08}" y2="${breadY - breadSize * 0.05}"
+            stroke="#8a4f1f" stroke-width="0.6" stroke-linecap="round"/>
+      <line x1="${breadX + breadSize * 0.04}" y1="${breadY - breadSize * 0.18}"
+            x2="${breadX + breadSize * 0.18}" y2="${breadY - breadSize * 0.05}"
+            stroke="#8a4f1f" stroke-width="0.6" stroke-linecap="round"/>`;
 
     return `
       <svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -871,34 +914,20 @@
           </linearGradient>
         </defs>
         <path d="${d}" fill="url(#pondg-${level})"/>
-        <!-- duck body -->
+        ${wake}
         <ellipse cx="${duckX}" cy="${duckY + duckSize * 0.35}"
                  rx="${duckSize * 0.55}" ry="${duckSize * 0.32}"
                  fill="#f9a825"/>
-        <!-- duck head -->
         <circle cx="${duckX + duckSize * 0.35}" cy="${duckY + duckSize * 0.05}"
                 r="${duckSize * 0.25}" fill="#f9a825"/>
-        <!-- beak -->
         <path d="M${duckX + duckSize * 0.55} ${duckY + duckSize * 0.05}
                  l${duckSize * 0.18} -${duckSize * 0.04}
                  l-${duckSize * 0.04} ${duckSize * 0.12} z"
               fill="#c77800"/>
-        <!-- eye -->
         <circle cx="${duckX + duckSize * 0.42}" cy="${duckY}"
                 r="${duckSize * 0.04}" fill="#0c0e13"/>
-        ${showCrown ? `
-        <!-- crown -->
-        <path d="M${duckX + duckSize * 0.18} ${duckY - duckSize * 0.18}
-                 L${duckX + duckSize * 0.27} ${duckY - duckSize * 0.36}
-                 L${duckX + duckSize * 0.36} ${duckY - duckSize * 0.22}
-                 L${duckX + duckSize * 0.45} ${duckY - duckSize * 0.36}
-                 L${duckX + duckSize * 0.54} ${duckY - duckSize * 0.18} Z"
-              fill="#f9a825" stroke="#c77800" stroke-width="0.5"/>` : ''}
-        ${showBread ? `
-        <!-- bread crumb -->
-        <ellipse cx="${breadX}" cy="${breadY}"
-                 rx="${duckSize * 0.18}" ry="${duckSize * 0.12}"
-                 fill="#c97f3a"/>` : ''}
+        ${crown}
+        ${bread}
       </svg>
     `;
   }
@@ -930,13 +959,14 @@
         ? Number(w.progress_pct).toFixed(4) + '%'
         : '—';
       const level = w.stage_level || 0;
+      const progress01 = (typeof w.progress01 === 'number') ? w.progress01 : 0;
       return `<div class="duck-card" data-worker="${escapeHtml(w.id)}">
         <div class="duck-head">
           <span class="duck-name">${escapeHtml(w.name)}</span>
           <span class="duck-tier">${emoji} ${escapeHtml(tier)}</span>
         </div>
         <span class="duck-flavor">${escapeHtml(flavor)}</span>
-        <div class="duck-pond">${pondSVG(level, {width: 360, height: 56})}</div>
+        <div class="duck-pond">${pondSVG(level, {width: 360, height: 56, progress01: progress01})}</div>
         <div class="duck-stats">
           <span><span class="label">Share</span><span class="v">${escapeHtml(String(share))}</span></span>
           <span><span class="label">Target</span><span class="v">${escapeHtml(String(target))}</span></span>
