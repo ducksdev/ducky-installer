@@ -883,8 +883,20 @@ def get_workers() -> list[dict]:
                 state.get("hidden", {}).pop(wid, None)
             _save_baselines(state)
 
-    rank = {"online": 0, "stale": 1, "offline": 2}
-    out.sort(key=lambda w: (rank.get(w["status"], 3), w["age_s"] if w["age_s"] is not None else 1e12))
+    # Sort alphabetically by worker name, using natural ordering so
+    # 'Nerd2' comes before 'Nerd10' (plain str sort would put 'Nerd10'
+    # first because '1' < '2' lexicographically). Case-insensitive.
+    def _natural_key(name: str) -> list:
+        out_parts: list = []
+        for chunk in re.split(r"(\d+)", name or ""):
+            if not chunk:
+                continue
+            if chunk.isdigit():
+                out_parts.append((0, int(chunk)))
+            else:
+                out_parts.append((1, chunk.lower()))
+        return out_parts
+    out.sort(key=lambda w: _natural_key(w["name"]))
     return out
 
 
