@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Health · Ducky Pool</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><circle cx='32' cy='32' r='32' fill='%230c0e13'/><ellipse cx='38' cy='42' rx='20' ry='14' fill='%23f9a825'/><circle cx='22' cy='26' r='11' fill='%23f9a825'/><path d='M 6 26 L 14 22 L 14 30 Z' fill='%23ff6f00'/><circle cx='20' cy='24' r='1.6' fill='%230c0e13'/></svg>">
+  <style>
+    :root {
+      --bg: #0c0e13;
+      --bg-alpha: rgba(12, 14, 19, 0.92);
+      --panel: #161922;
+      --panel-soft: #11141c;
+      --border: #232735;
+      --fg: #e6e9ef;
+      --muted: #8a92a6;
+      --accent: #f9a825;
+      --accent-deep: #c77800;
+      --success: #4cd964;
+      --warn: #ffaa00;
+      --error: #ff6b6b;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      background: var(--bg); color: var(--fg);
+      min-height: 100vh;
+    }
+    header.app-header {
+      position: sticky; top: 0; z-index: 50;
+      background: var(--bg-alpha);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    header.app-header .inner {
+      max-width: 1280px; margin: 0 auto;
+      padding: 0.85rem 1.5rem;
+      display: flex; align-items: center; gap: 0.75rem;
+    }
+    header.app-header h1 { font-weight: 600; letter-spacing: -0.01em; margin: 0; font-size: 1.4rem; }
+    header.app-header h1 .accent { color: var(--accent); }
+    header.app-header .grow { flex: 1; }
+    header.app-header a.nav, header.app-header button.nav {
+      color: var(--muted); text-decoration: none;
+      font-size: 0.82rem; padding: 0.35rem 0.65rem;
+      border: 1px solid var(--border); border-radius: 8px;
+      transition: border-color 0.15s, color 0.15s;
+      white-space: nowrap;
+      background: transparent; cursor: pointer; font-family: inherit;
+    }
+    header.app-header a.nav:hover, header.app-header button.nav:hover {
+      color: var(--accent); border-color: var(--accent);
+    }
+
+    .wrap {
+      max-width: 1100px; margin: 0 auto;
+      padding: 1.25rem 1.5rem 3rem;
+    }
+    .lede { color: var(--muted); margin: 0 0 1rem; font-size: 0.92rem; }
+
+    .card {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      margin-bottom: 0.85rem;
+    }
+    .card > header {
+      padding: 0.85rem 1.1rem;
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 0.5rem;
+    }
+    .card > header.collapsible { cursor: pointer; user-select: none; transition: background 0.1s; }
+    .card > header.collapsible:hover { background: rgba(255,255,255,0.02); }
+    .card > header h2 {
+      font-size: 0.74rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.08em; color: var(--muted); margin: 0;
+      display: flex; align-items: center; gap: 0.5rem;
+    }
+    .card > header .chevron {
+      color: var(--muted); font-size: 0.85rem;
+      transition: transform 0.2s;
+      display: inline-block; margin-left: 0.4rem;
+    }
+    .card.collapsed > header .chevron { transform: rotate(-90deg); }
+    .card .body {
+      padding: 0 1.1rem 1.05rem;
+      max-height: 9999px;
+      transition: max-height 0.25s ease, padding 0.2s ease, opacity 0.15s ease;
+      overflow: hidden;
+    }
+    .card.collapsed .body { max-height: 0; padding-top: 0; padding-bottom: 0; opacity: 0; }
+
+    .pill {
+      display: inline-flex; align-items: center; gap: 0.3rem;
+      padding: 0.2rem 0.55rem; border-radius: 999px;
+      font-size: 0.72rem; font-weight: 500;
+      border: 1px solid transparent;
+    }
+    .pill.ok    { background: rgba(76,217,100,0.12); color: #6ce080; border-color: rgba(76,217,100,0.3); }
+    .pill.warn  { background: rgba(255,170,0,0.12); color: #ffc955; border-color: rgba(255,170,0,0.3); }
+    .pill.error { background: rgba(255,107,107,0.12); color: #ffb1b1; border-color: rgba(255,107,107,0.3); }
+    .pill.dim   { background: rgba(255,255,255,0.04); color: var(--muted); border-color: var(--border); }
+
+    /* ── stats grid ──────────────────────────────────────────── */
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 0.75rem;
+    }
+    .stat {
+      background: var(--panel-soft);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.75rem 0.9rem;
+    }
+    .stat .label {
+      font-size: 0.7rem; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.05em;
+      margin-bottom: 0.3rem;
+    }
+    .stat .value {
+      font-family: ui-monospace, monospace;
+      font-size: 1.05rem; font-weight: 500;
+    }
+    .stat .sub {
+      font-size: 0.74rem; color: var(--muted);
+      margin-top: 0.2rem;
+    }
+    /* progress bars inside stat cards */
+    .bar {
+      margin-top: 0.4rem;
+      height: 6px; background: var(--border); border-radius: 3px;
+      overflow: hidden;
+    }
+    .bar > .fill {
+      height: 100%; background: var(--accent);
+      transition: width 0.3s ease;
+    }
+    .bar > .fill.warn  { background: var(--warn); }
+    .bar > .fill.error { background: var(--error); }
+
+    /* ── service cards ───────────────────────────────────────── */
+    .services-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 0.75rem;
+    }
+    .service-card {
+      background: var(--panel-soft);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.85rem 1rem;
+    }
+    .service-card .head {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 0.5rem; margin-bottom: 0.7rem;
+    }
+    .service-card .name {
+      font-size: 0.95rem; font-weight: 500;
+    }
+    .service-card .detail {
+      font-size: 0.78rem; color: var(--muted);
+      font-family: ui-monospace, monospace;
+      line-height: 1.5;
+    }
+    .service-card .detail .key { display: inline-block; min-width: 90px; }
+    .service-card .actions {
+      margin-top: 0.7rem; display: flex; gap: 0.4rem; flex-wrap: wrap;
+    }
+
+    /* ── log viewer ──────────────────────────────────────────── */
+    .log-tabs {
+      display: flex; gap: 0.4rem; margin-bottom: 0.7rem;
+      flex-wrap: wrap;
+    }
+    .log-tab {
+      padding: 0.4rem 0.85rem; border-radius: 8px;
+      background: transparent; color: var(--muted);
+      border: 1px solid var(--border);
+      font-size: 0.82rem; cursor: pointer;
+      font-family: inherit;
+    }
+    .log-tab:hover { color: var(--accent); border-color: var(--accent); }
+    .log-tab.active {
+      background: rgba(249,168,37,0.1);
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+    .log-controls {
+      display: flex; gap: 0.5rem; align-items: center;
+      margin-bottom: 0.5rem; font-size: 0.78rem; color: var(--muted);
+    }
+    .log-controls label {
+      display: flex; align-items: center; gap: 0.3rem;
+      cursor: pointer;
+    }
+    .log-viewport {
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.7rem 0.9rem;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 0.74rem; line-height: 1.5;
+      color: #cfd5e1;
+      max-height: 460px; overflow-y: auto; overflow-x: auto;
+      white-space: pre;
+    }
+    .log-line { padding: 0; }
+    .log-line.log-err { color: var(--error); }
+    .log-line.log-warn { color: var(--warn); }
+
+    /* ── form pieces shared with settings ────────────────────── */
+    button {
+      padding: 0.45rem 0.95rem; border-radius: 8px; border: 0;
+      background: var(--accent); color: #1a1200; font-weight: 600;
+      cursor: pointer; transition: background 0.15s;
+      font-size: 0.82rem;
+    }
+    button:hover { background: var(--accent-deep); color: #fff; }
+    button.ghost {
+      background: transparent; color: var(--muted);
+      border: 1px solid var(--border); font-weight: 500;
+      padding: 0.4rem 0.8rem; font-size: 0.8rem;
+    }
+    button.ghost:hover {
+      background: rgba(249,168,37,0.08); color: var(--accent);
+      border-color: var(--accent);
+    }
+    button.danger {
+      background: rgba(255,107,107,0.12); color: #ffb1b1;
+      border: 1px solid rgba(255,107,107,0.3);
+      font-weight: 500;
+      padding: 0.4rem 0.8rem; font-size: 0.8rem;
+    }
+    button.danger:hover {
+      background: rgba(255,107,107,0.22); color: #fff;
+      border-color: var(--error);
+    }
+
+    .flash { padding: 0.65rem 0.9rem; border-radius: 8px; margin-bottom: 0.85rem; font-size: 0.88rem; }
+    .flash.ok    { background: rgba(76,217,100,0.12); color: #6ce080; border: 1px solid rgba(76,217,100,0.3); }
+    .flash.error { background: rgba(255,107,107,0.12); color: #ffb1b1; border: 1px solid rgba(255,107,107,0.3); }
+
+    .mono { font-family: ui-monospace, monospace; }
+  </style>
+</head>
+<body>
+
+  <header class="app-header">
+    <div class="inner">
+      <svg width="30" height="30" viewBox="0 0 64 64" aria-hidden="true">
+        <ellipse cx="38" cy="42" rx="20" ry="14" fill="#f9a825"/>
+        <circle cx="22" cy="26" r="11" fill="#f9a825"/>
+        <path d="M 6 26 L 14 22 L 14 30 Z" fill="#ff6f00"/>
+        <circle cx="20" cy="24" r="1.6" fill="#0c0e13"/>
+      </svg>
+      <h1>Ducky <span class="accent">Pool</span> · Health</h1>
+      <span class="grow"></span>
+      <a class="nav" href="{{ url_for('index') }}">← Dashboard</a>
+      {% if auth_enabled %}
+        <form method="post" action="{{ url_for('logout') }}" style="display: inline; margin: 0;">
+          <button type="submit" class="nav">Sign out</button>
+        </form>
+      {% endif %}
+    </div>
+  </header>
+
+  <div class="wrap">
+    <p class="lede">System health, service status, live logs.</p>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}
+        <div class="flash {{ cat }}">{{ msg }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    <!-- ── system stats ───────────────────────────────────────── -->
+    <div class="card" data-card="system">
+      <header class="collapsible">
+        <h2>System</h2>
+        <span class="chevron">▼</span>
+      </header>
+      <div class="body">
+        <div class="stat-grid" id="system-stats">
+          <p class="lede">Loading…</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── services ───────────────────────────────────────────── -->
+    <div class="card" data-card="services">
+      <header class="collapsible">
+        <h2>Services</h2>
+        <span class="chevron">▼</span>
+      </header>
+      <div class="body">
+        <div class="services-grid" id="services-grid">
+          <p class="lede">Loading…</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── logs ───────────────────────────────────────────────── -->
+    <div class="card" data-card="logs">
+      <header class="collapsible">
+        <h2>Live logs</h2>
+        <span class="chevron">▼</span>
+      </header>
+      <div class="body">
+        <div class="log-tabs">
+          <button class="log-tab active" data-log="ckpool">ckpool</button>
+          <button class="log-tab" data-log="bchnode">bchnode</button>
+          <button class="log-tab" data-log="web">web</button>
+        </div>
+        <div class="log-controls">
+          <label>
+            <input type="checkbox" id="log-follow" checked> Follow tail
+          </label>
+          <span style="margin-left: auto;">
+            <span id="log-status" class="mono">—</span>
+          </span>
+        </div>
+        <div class="log-viewport" id="log-viewport">
+          <p class="lede" style="margin: 0;">Loading…</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+  // ── helpers ─────────────────────────────────────────────────────
+  function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+  }
+  function fmtBytes(n) {
+    if (n == null) return '—';
+    const u = ['B','KB','MB','GB','TB','PB'];
+    let i = 0, x = n;
+    while (x >= 1024 && i < u.length - 1) { x /= 1024; i++; }
+    return x.toFixed(x >= 100 ? 0 : x >= 10 ? 1 : 2) + ' ' + u[i];
+  }
+  function fmtDuration(s) {
+    if (s == null) return '—';
+    const days = Math.floor(s / 86400);
+    const hours = Math.floor((s % 86400) / 3600);
+    const mins = Math.floor((s % 3600) / 60);
+    if (days > 0) return `${days}d ${hours}h`;
+    if (hours > 0) return `${hours}h ${mins}m`;
+    if (mins > 0) return `${mins}m ${s % 60}s`;
+    return `${s}s`;
+  }
+  function pctClass(p) {
+    if (p >= 90) return 'error';
+    if (p >= 75) return 'warn';
+    return '';
+  }
+
+  // ── system stats render ─────────────────────────────────────────
+  function renderSystem(sys) {
+    if (!sys) return '<p class="lede">No system data.</p>';
+    const out = [];
+    // Memory
+    if (sys.memory) {
+      const m = sys.memory;
+      const cls = pctClass(m.used_pct);
+      out.push(`<div class="stat">
+        <div class="label">Memory</div>
+        <div class="value">${m.used_pct.toFixed(1)}%</div>
+        <div class="sub">${fmtBytes(m.used_bytes)} of ${fmtBytes(m.total_bytes)}</div>
+        <div class="bar"><div class="fill ${cls}" style="width: ${m.used_pct}%"></div></div>
+      </div>`);
+    }
+    // Swap
+    if (sys.swap && sys.swap.total_bytes > 0) {
+      const s = sys.swap;
+      const cls = pctClass(s.used_pct);
+      out.push(`<div class="stat">
+        <div class="label">Swap</div>
+        <div class="value">${s.used_pct.toFixed(1)}%</div>
+        <div class="sub">${fmtBytes(s.used_bytes)} of ${fmtBytes(s.total_bytes)}</div>
+        <div class="bar"><div class="fill ${cls}" style="width: ${s.used_pct}%"></div></div>
+      </div>`);
+    }
+    // Load
+    if (sys.load) {
+      const cores = sys.cpu_count || 1;
+      const ratio = sys.load['1m'] / cores;
+      const cls = ratio >= 1.0 ? 'error' : ratio >= 0.7 ? 'warn' : '';
+      out.push(`<div class="stat">
+        <div class="label">Load avg</div>
+        <div class="value">${sys.load['1m'].toFixed(2)}</div>
+        <div class="sub">5m ${sys.load['5m'].toFixed(2)} · 15m ${sys.load['15m'].toFixed(2)} · ${cores} cores</div>
+        <div class="bar"><div class="fill ${cls}" style="width: ${Math.min(100, ratio * 100)}%"></div></div>
+      </div>`);
+    }
+    // Uptime
+    if (sys.uptime_s != null) {
+      out.push(`<div class="stat">
+        <div class="label">Host uptime</div>
+        <div class="value">${fmtDuration(sys.uptime_s)}</div>
+      </div>`);
+    }
+    // Disks (each gets its own card)
+    (sys.disks || []).forEach(d => {
+      if (d.error) {
+        out.push(`<div class="stat">
+          <div class="label">${escapeHtml(d.label)}</div>
+          <div class="value">—</div>
+          <div class="sub" style="color: var(--error);">${escapeHtml(d.error)}</div>
+        </div>`);
+        return;
+      }
+      const cls = pctClass(d.used_pct);
+      out.push(`<div class="stat">
+        <div class="label">${escapeHtml(d.label)}</div>
+        <div class="value">${d.used_pct.toFixed(1)}%</div>
+        <div class="sub">${fmtBytes(d.used_bytes)} of ${fmtBytes(d.total_bytes)} (${fmtBytes(d.free_bytes)} free)</div>
+        <div class="bar"><div class="fill ${cls}" style="width: ${d.used_pct}%"></div></div>
+      </div>`);
+    });
+    return out.join('');
+  }
+
+  // ── services render ─────────────────────────────────────────────
+  function renderServices(services) {
+    if (!services || !services.length) return '<p class="lede">No service data.</p>';
+    return services.map(s => {
+      const pill = s.running
+        ? '<span class="pill ok">Running</span>'
+        : '<span class="pill error">Down</span>';
+      const detailLines = [];
+      if (s.last_log_age_s != null) {
+        detailLines.push(`<div><span class="key">Last log</span> ${fmtDuration(s.last_log_age_s)} ago</div>`);
+      }
+      if (s.name === 'bchnode' && s.rpc_ok) {
+        const pct = (s.verification_progress * 100).toFixed(2);
+        detailLines.push(`<div><span class="key">Chain</span> ${escapeHtml(s.chain || '')}</div>`);
+        detailLines.push(`<div><span class="key">Blocks</span> ${(s.blocks || 0).toLocaleString()} / ${(s.headers || 0).toLocaleString()}</div>`);
+        detailLines.push(`<div><span class="key">Sync</span> ${pct}% ${s.ibd ? '(IBD)' : '(synced)'}</div>`);
+        detailLines.push(`<div><span class="key">Peers</span> ${s.connections || 0}</div>`);
+        if (s.version) detailLines.push(`<div><span class="key">Version</span> ${escapeHtml(s.version)}</div>`);
+      }
+      if (s.name === 'bchnode' && s.rpc_ok === false) {
+        detailLines.push(`<div style="color: var(--error);">RPC not responding: ${escapeHtml(s.rpc_error || '')}</div>`);
+      }
+      if (s.name === 'ckpool' && s.pool_ok) {
+        detailLines.push(`<div><span class="key">Workers</span> ${s.pool_workers != null ? s.pool_workers : '—'}</div>`);
+        detailLines.push(`<div><span class="key">Users</span> ${s.pool_users != null ? s.pool_users : '—'}</div>`);
+      }
+      if (s.error) {
+        detailLines.push(`<div style="color: var(--error);">${escapeHtml(s.error)}</div>`);
+      }
+      // Restart button — confirmation message tailored per service
+      const confirmMsg = s.name === 'bchnode'
+        ? 'Restart bchnode? It will take ~10 seconds, but if mid-sync, it will resume from the last checkpoint (no data loss).'
+        : s.name === 'ckpool'
+        ? 'Restart ckpool? Connected miners will reconnect within seconds. No shares are lost.'
+        : 'Restart the dashboard? You will be briefly disconnected and may need to refresh.';
+      const action = `<form method="post" action="/health/restart/${s.name}" style="display: inline;"
+                            onsubmit="return confirm('${confirmMsg.replace(/'/g, "\\'")}');">
+        <button type="submit" class="ghost">Restart</button>
+      </form>`;
+      return `<div class="service-card">
+        <div class="head">
+          <span class="name">${escapeHtml(s.label)}</span>
+          ${pill}
+        </div>
+        <div class="detail">${detailLines.join('')}</div>
+        <div class="actions">${action}</div>
+      </div>`;
+    }).join('');
+  }
+
+  // ── poll loop for system + services ─────────────────────────────
+  async function pollHealth() {
+    try {
+      const r = await fetch('/api/health', { cache: 'no-store' });
+      if (r.status === 401) {
+        window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname);
+        return;
+      }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      document.getElementById('system-stats').innerHTML = renderSystem(data.system);
+      document.getElementById('services-grid').innerHTML = renderServices(data.services);
+    } catch (e) {
+      // soft fail — keep prior render
+      console.warn('health poll failed', e);
+    }
+  }
+  pollHealth();
+  setInterval(pollHealth, 5000);
+
+  // ── logs ────────────────────────────────────────────────────────
+  let currentLog = 'ckpool';
+  let lastByte = null;       // null = initial fetch
+  let lineBuffer = [];        // ring of recent lines
+  const LINE_LIMIT = 500;
+  let logTimer = null;
+
+  const logViewport = document.getElementById('log-viewport');
+  const logFollow = document.getElementById('log-follow');
+  const logStatus = document.getElementById('log-status');
+
+  function logClassify(line) {
+    const l = line.toLowerCase();
+    if (l.includes('error') || l.includes('fatal') || l.includes('failed')) return 'log-err';
+    if (l.includes('warn')) return 'log-warn';
+    return '';
+  }
+  function renderLogs() {
+    if (!lineBuffer.length) {
+      logViewport.innerHTML = '<p class="lede" style="margin:0;">No log lines yet.</p>';
+      return;
+    }
+    logViewport.innerHTML = lineBuffer.map(l => {
+      const cls = logClassify(l);
+      return `<div class="log-line ${cls}">${escapeHtml(l)}</div>`;
+    }).join('');
+    if (logFollow.checked) {
+      logViewport.scrollTop = logViewport.scrollHeight;
+    }
+  }
+  async function pollLogs() {
+    try {
+      const url = `/api/logs/${currentLog}` + (lastByte != null ? `?after_byte=${lastByte}` : '');
+      const r = await fetch(url, { cache: 'no-store' });
+      if (r.status === 401) {
+        window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname);
+        return;
+      }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      if (data.error) {
+        logStatus.textContent = data.error;
+        return;
+      }
+      if (lastByte === null) {
+        lineBuffer = data.lines || [];
+      } else if (data.lines && data.lines.length) {
+        lineBuffer.push(...data.lines);
+        if (lineBuffer.length > LINE_LIMIT) {
+          lineBuffer = lineBuffer.slice(-LINE_LIMIT);
+        }
+      }
+      lastByte = data.next_byte;
+      logStatus.textContent = `${lineBuffer.length} lines · ${(lastByte / 1024).toFixed(1)} KB read`;
+      renderLogs();
+    } catch (e) {
+      logStatus.textContent = 'poll error';
+      console.warn('log poll failed', e);
+    }
+  }
+  function switchLog(name) {
+    currentLog = name;
+    lastByte = null;
+    lineBuffer = [];
+    document.querySelectorAll('.log-tab').forEach(t => {
+      t.classList.toggle('active', t.dataset.log === name);
+    });
+    logStatus.textContent = '—';
+    pollLogs();
+  }
+  document.querySelectorAll('.log-tab').forEach(t => {
+    t.addEventListener('click', () => switchLog(t.dataset.log));
+  });
+  // Initial fetch + poll every 2s while log card is expanded.
+  function maybePollLogs() {
+    const card = document.querySelector('[data-card="logs"]');
+    if (card && !card.classList.contains('collapsed')) pollLogs();
+  }
+  pollLogs();
+  logTimer = setInterval(maybePollLogs, 2000);
+
+  // ── collapsible cards (same pattern as settings) ───────────────
+  const LS_PREFIX = 'ducky-health-collapse:';
+  function applyCollapseState() {
+    document.querySelectorAll('.card[data-card]').forEach(card => {
+      const id = card.dataset.card;
+      const stored = localStorage.getItem(LS_PREFIX + id);
+      card.classList.toggle('collapsed', stored === '1');
+    });
+  }
+  function bindCollapseHandlers() {
+    document.querySelectorAll('.card[data-card] > header.collapsible').forEach(hdr => {
+      hdr.addEventListener('click', e => {
+        if (e.target.closest('button, a, input, label')) return;
+        const card = hdr.parentElement;
+        const id = card.dataset.card;
+        const nowCollapsed = !card.classList.contains('collapsed');
+        card.classList.toggle('collapsed', nowCollapsed);
+        localStorage.setItem(LS_PREFIX + id, nowCollapsed ? '1' : '0');
+      });
+    });
+  }
+  applyCollapseState();
+  bindCollapseHandlers();
+  </script>
+</body>
+</html>

@@ -15,6 +15,8 @@ Endpoints:
 from __future__ import annotations
 
 import json
+import logging
+import logging.handlers
 import os
 import re
 import socket
@@ -651,7 +653,329 @@ def reset_baseline(worker_id: str | None) -> int:
 
 # ──────────────────────────── readers ────────────────────────────
 
-def get_node_status() -> dict:
+# ──────────────────────────── health ────────────────────────────
+#
+# /health page data. Read-only system inspection: disk, RAM, load,
+# uptime, BCH sync, plus best-effort container running detection.
+# All paths come from env vars set by docker-compose so we can run
+# the same code outside docker (tests) or with different mounts.
+
+HOST_PROC = os.environ.get("HOST_PROC", "/proc")
+HOST_ROOT = os.environ.get("HOST_ROOT", "/")
+BCHNODE_LOG = os.environ.get("BCHNODE_LOG", "/bchnode-logs/debug.log")
+WEB_LOG_FILE = os.environ.get("WEB_LOG_FILE", "/shared/logs/web.log")
+CKPOOL_LOG_FILE = os.environ.get("CKPOOL_LOG_FILE", "/pool-logs/ckpool.log")
+
+
+def _read_proc_file(rel: str) -> str | None:
+    """Read a file under /host-proc, return its contents or None on error."""
+    path = os.path.join(HOST_PROC, rel)
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def get_system_health() -> dict:
+    """Disk, RAM, load, uptime — best-effort, never raises."""
+    out: dict = {}
+
+    # Disk usage of the host root and the data directory
+    disks = []
+    for label, path in (
+        ("Root (/)", HOST_ROOT),
+        ("Data (/var/lib/ducky-pool)", os.path.join(HOST_ROOT, "var/lib/ducky-pool")),
+    ):
+        try:
+            st = os.statvfs(path)
+            total = st.f_blocks * st.f_frsize
+            free = st.f_bavail * st.f_frsize
+            used = total - free
+            disks.append({
+                "label": label,
+                "total_bytes": total,
+                "used_bytes": used,
+                "free_bytes": free,
+                "used_pct": round(100 * used / total, 1) if total > 0 else 0.0,
+            })
+        except OSError as exc:
+            disks.append({"label": label, "error": str(exc)})
+    out["disks"] = disks
+
+    # Memory from /proc/meminfo
+    mem_raw = _read_proc_file("meminfo")
+    if mem_raw:
+        mem = {}
+        for line in mem_raw.splitlines():
+            parts = line.split(":", 1)
+            if len(parts) != 2:
+                continue
+            key = parts[0].strip()
+            val = parts[1].strip().split()[0]
+            try:
+                mem[key] = int(val) * 1024  # /proc/meminfo is kB
+            except ValueError:
+                pass
+        total = mem.get("MemTotal", 0)
+        avail = mem.get("MemAvailable", mem.get("MemFree", 0))
+        used = max(0, total - avail)
+        out["memory"] = {
+            "total_bytes": total,
+            "available_bytes": avail,
+            "used_bytes": used,
+            "used_pct": round(100 * used / total, 1) if total > 0 else 0.0,
+        }
+        swap_total = mem.get("SwapTotal", 0)
+        swap_free = mem.get("SwapFree", 0)
+        swap_used = max(0, swap_total - swap_free)
+        out["swap"] = {
+            "total_bytes": swap_total,
+            "used_bytes": swap_used,
+            "used_pct": round(100 * swap_used / swap_total, 1) if swap_total > 0 else 0.0,
+        }
+
+    # Load average
+    load_raw = _read_proc_file("loadavg")
+    if load_raw:
+        parts = load_raw.split()
+        try:
+            out["load"] = {
+                "1m": float(parts[0]),
+                "5m": float(parts[1]),
+                "15m": float(parts[2]),
+            }
+        except (IndexError, ValueError):
+            pass
+
+    # Uptime
+    uptime_raw = _read_proc_file("uptime")
+    if uptime_raw:
+        try:
+            out["uptime_s"] = int(float(uptime_raw.split()[0]))
+        except (IndexError, ValueError):
+            pass
+
+    # CPU count (informational — tells us load context)
+    try:
+        out["cpu_count"] = os.cpu_count() or 1
+    except Exception:  # noqa: BLE001
+        out["cpu_count"] = 1
+
+    return out
+
+
+def get_service_health() -> list[dict]:
+    """Per-service status. Detected via sentinel files since the web
+    container has no Docker access. A service is 'running' if its
+    expected sentinel file has been touched recently; otherwise we
+    flag it as down or unknown."""
+    now = time.time()
+    services = []
+
+    # bchnode: debug.log gets appended-to constantly while running
+    bch = {"name": "bchnode", "label": "BCH node"}
+    try:
+        st = os.stat(BCHNODE_LOG)
+        age = now - st.st_mtime
+        bch["running"] = age < 120  # touched in last 2 minutes
+        bch["last_log_age_s"] = int(age)
+    except OSError:
+        bch["running"] = False
+        bch["error"] = "debug.log not found (container may not be running)"
+    # Layer in BCH sync info if RPC works
+    node = get_node_status()
+    if node.get("ok"):
+        bch["chain"] = node.get("chain")
+        bch["blocks"] = node.get("blocks")
+        bch["headers"] = node.get("headers")
+        bch["verification_progress"] = node.get("verification_progress")
+        bch["ibd"] = node.get("ibd")
+        bch["connections"] = node.get("connections")
+        bch["version"] = node.get("version")
+        bch["rpc_ok"] = True
+    else:
+        bch["rpc_ok"] = False
+        bch["rpc_error"] = node.get("error")
+    services.append(bch)
+
+    # ckpool: pool.status is rewritten every 60s; ckpool.log is appended
+    # to whenever a share lands. We use ckpool.log mtime for liveness.
+    ck = {"name": "ckpool", "label": "ckpool"}
+    try:
+        st = os.stat(CKPOOL_LOG_FILE)
+        age = now - st.st_mtime
+        ck["running"] = age < 180  # 3 minutes — ckpool writes status every 60s
+        ck["last_log_age_s"] = int(age)
+    except OSError:
+        ck["running"] = False
+        ck["error"] = "ckpool.log not found"
+    # Pool status snapshot
+    pool = get_pool_stats()
+    if pool.get("ok"):
+        ck["pool_ok"] = True
+        ck["pool_workers"] = pool.get("workers")
+        ck["pool_users"] = pool.get("users")
+    else:
+        ck["pool_ok"] = False
+    services.append(ck)
+
+    # web: that's us. We're obviously running if we can answer this.
+    services.append({
+        "name": "web",
+        "label": "Dashboard",
+        "running": True,
+    })
+
+    return services
+
+
+def health_payload() -> dict:
+    """Combined payload for /api/health. Always returns even on partial
+    failures — UI shows what it can."""
+    return {
+        "system": get_system_health(),
+        "services": get_service_health(),
+        "now": int(time.time()),
+    }
+
+
+# ──────────────────────────── log tailer ────────────────────────────
+#
+# Live log streaming for the Health page. Uses simple HTTP polling
+# rather than SSE: simpler, works through any reverse proxy, easy to
+# reason about. The client passes ?after_byte=<N>; we return everything
+# from byte N onward (capped to the latest N lines or M bytes).
+
+LOG_FILES = {
+    "ckpool":  CKPOOL_LOG_FILE,
+    "bchnode": BCHNODE_LOG,
+    "web":     WEB_LOG_FILE,
+}
+LOG_TAIL_MAX_LINES = 500     # initial fetch caps at this many lines
+LOG_TAIL_MAX_BYTES = 200_000  # never read more than this in one call
+
+
+def tail_log(name: str, after_byte: int | None = None) -> dict:
+    """Return new log content for the named service.
+
+    If after_byte is None, return the last LOG_TAIL_MAX_LINES lines.
+    Otherwise return everything from after_byte to the current EOF
+    (capped at LOG_TAIL_MAX_BYTES). The next_byte field tells the
+    client what to pass on its next poll."""
+    path = LOG_FILES.get(name)
+    if not path:
+        return {"error": "unknown log"}
+    try:
+        size = os.path.getsize(path)
+    except OSError as exc:
+        return {"error": f"cannot stat log: {exc}", "lines": [], "next_byte": 0}
+
+    # If file shrank (log rotation, restart that truncated), reset cursor.
+    if after_byte is not None and after_byte > size:
+        after_byte = 0
+
+    if after_byte is None:
+        # Initial fetch — read tail of file. Read up to LOG_TAIL_MAX_BYTES
+        # from EOF, then keep only the last LOG_TAIL_MAX_LINES lines.
+        start = max(0, size - LOG_TAIL_MAX_BYTES)
+        try:
+            with open(path, "rb") as f:
+                f.seek(start)
+                blob = f.read(size - start)
+        except OSError as exc:
+            return {"error": str(exc), "lines": [], "next_byte": 0}
+        text = blob.decode("utf-8", errors="replace")
+        # Drop a possibly-partial first line if we didn't start at 0
+        if start > 0:
+            nl = text.find("\n")
+            if nl >= 0:
+                text = text[nl + 1:]
+        lines = text.splitlines()[-LOG_TAIL_MAX_LINES:]
+        return {"lines": lines, "next_byte": size}
+
+    # Incremental fetch — read from after_byte to EOF, cap at MAX_BYTES.
+    end = min(size, after_byte + LOG_TAIL_MAX_BYTES)
+    if end <= after_byte:
+        return {"lines": [], "next_byte": after_byte}
+    try:
+        with open(path, "rb") as f:
+            f.seek(after_byte)
+            blob = f.read(end - after_byte)
+    except OSError as exc:
+        return {"error": str(exc), "lines": [], "next_byte": after_byte}
+    text = blob.decode("utf-8", errors="replace")
+    lines = text.splitlines()
+    # If the chunk doesn't end on a newline, the last line is partial —
+    # drop it and rewind next_byte so we re-read it next poll.
+    if blob and not blob.endswith(b"\n") and lines:
+        partial = lines.pop()
+        end -= len(partial.encode("utf-8"))
+    return {"lines": lines, "next_byte": end}
+
+
+# ──────────────────────────── web log file ────────────────────────────
+#
+# Write our own application log to /shared/logs/web.log so it shows up
+# in the Health page log viewer alongside ckpool and bchnode.
+
+
+def _setup_web_log_file() -> None:
+    """Configure a rotating file handler in /shared/logs/web.log so the
+    Health page log viewer has something to show for the 'web' service."""
+    log_dir = os.path.dirname(WEB_LOG_FILE)
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+        handler = logging.handlers.RotatingFileHandler(
+            WEB_LOG_FILE, maxBytes=2_000_000, backupCount=2, encoding="utf-8"
+        )
+        handler.setLevel(logging.INFO)
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        ))
+        # Attach to both Flask's logger and the root so any module-level
+        # logging.info(...) calls get captured.
+        app.logger.addHandler(handler)
+        app.logger.setLevel(logging.INFO)
+        logging.getLogger().addHandler(handler)
+        app.logger.info("web log started → %s", WEB_LOG_FILE)
+    except OSError as exc:
+        # Logging infra is best-effort. If /shared isn't writable
+        # somehow, the rest of the app keeps working.
+        print(f"[web] could not configure file log: {exc}", flush=True)
+
+
+# ──────────────────────────── restart markers ────────────────────────────
+#
+# Restart actions for each service drop a marker file into /shared.
+# ckpool's container watches its own marker (/shared/.restart_ckpool)
+# from inside the container. bchnode and web restarts are picked up
+# by the host-side ducky-restart-watcher.service which calls
+# `docker compose restart <name>`.
+
+ALLOWED_RESTART_SERVICES = {"ckpool", "bchnode", "web"}
+RESTART_MARKER_PREFIX = ".restart_"
+
+
+def request_service_restart(service: str) -> tuple[bool, str]:
+    """Drop a marker file the appropriate watcher picks up. Returns
+    (ok, message). Idempotent — if a marker is already present we
+    don't re-create it (the watcher will pick up the existing one)."""
+    if service not in ALLOWED_RESTART_SERVICES:
+        return False, f"unknown service '{service}'"
+    marker = os.path.join(STATE_DIR, RESTART_MARKER_PREFIX + service)
+    try:
+        # Only create if it doesn't already exist (avoid double-restart).
+        if not os.path.exists(marker):
+            with open(marker, "w", encoding="utf-8") as f:
+                f.write(str(int(time.time())))
+        return True, f"{service} restart requested"
+    except OSError as exc:
+        return False, f"could not write marker: {exc}"
+
+
+
     try:
         info = rpc("getblockchaininfo")
         net = rpc("getnetworkinfo")
@@ -2395,6 +2719,54 @@ def test_webhook():
     return redirect(url_for("settings_page"))
 
 
+# ──────────────────────────── /health ────────────────────────────
+
+
+@app.route("/health", methods=["GET"])
+@login_required
+def health_page():
+    return render_template(
+        "health.html",
+        public=False,
+        auth_enabled=auth_enabled(),
+    )
+
+
+@app.route("/api/health", methods=["GET"])
+@login_required_json
+def api_health():
+    return jsonify(health_payload())
+
+
+@app.route("/api/logs/<service>", methods=["GET"])
+@login_required_json
+def api_logs(service: str):
+    after = request.args.get("after_byte")
+    after_byte: int | None
+    try:
+        after_byte = int(after) if after is not None else None
+    except (TypeError, ValueError):
+        after_byte = None
+    return jsonify(tail_log(service, after_byte))
+
+
+@app.route("/health/restart/<service>", methods=["POST"])
+@login_required
+def health_restart(service: str):
+    ok, msg = request_service_restart(service)
+    if ok:
+        app.logger.info("restart requested for %s by user", service)
+        flash(
+            f"{service.capitalize()} restart requested. "
+            f"It should come back online within a few seconds.",
+            "ok",
+        )
+    else:
+        flash(f"Restart failed: {msg}", "error")
+    return redirect(url_for("health_page"))
+
+
+_setup_web_log_file()
 _start_watcher()
 _start_share_tailer()
 

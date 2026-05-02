@@ -208,11 +208,22 @@ services:
       PAYOUT_ADDRESS_FILE: /shared/payout.address
       POOL_STATUS_FILE: /pool-logs/pool/pool.status
       WORKERS_DIR: /pool-logs/users
+      # Health page reads host stats from /host-proc and disk usage from
+      # /host-root. These are bind-mounted read-only below.
+      HOST_PROC: /host-proc
+      HOST_ROOT: /host-root
+      BCHNODE_LOG: /bchnode-logs/debug.log
     volumes:
       - ${DATA_DIR}/shared:/shared:rw
       # Read pool.status + workers/* and allow removing worker files
       # so the dashboard's "Forget worker" button can clean them up.
       - ${DATA_DIR}/ckpool:/pool-logs
+      # Health page: system stats (read-only)
+      - /proc:/host-proc:ro
+      # Health page: disk usage of the data drive (read-only)
+      - /:/host-root:ro
+      # Health page: bchnode debug log tail (read-only)
+      - ${DATA_DIR}/bchnode:/bchnode-logs:ro
     ports:
       - "${WEB_PORT}:${WEB_PORT}"
     depends_on:
@@ -316,6 +327,73 @@ UNIT
     ok "Service ${SERVICE_NAME} enabled — will start on boot"
 }
 
+install_restart_watcher() {
+    # Watches the marker dir (/shared on the host = $DATA_DIR/shared)
+    # for .restart_<service> files dropped by the dashboard, then runs
+    # `docker compose restart <service>`. ckpool has its own internal
+    # marker handler in entrypoint.sh, so this watcher only handles
+    # bchnode and web restarts.
+    step "Installing host-side restart watcher"
+    cat > "/usr/local/bin/ducky-restart-watcher.sh" <<WATCHER
+#!/usr/bin/env bash
+set -u
+MARKER_DIR="${DATA_DIR}/shared"
+COMPOSE_DIR="${INSTALL_DIR}"
+mkdir -p "\$MARKER_DIR"
+
+handle_marker() {
+    local marker="\$1"
+    local svc="\$2"
+    if [ -e "\$marker" ]; then
+        echo "[ducky-restart-watcher] \$svc restart requested"
+        # Stage the marker so we don't loop if compose exits non-zero.
+        local stamp
+        stamp=\$(date +%s)
+        local staged="\$marker.processing.\$stamp"
+        if mv "\$marker" "\$staged" 2>/dev/null; then
+            (
+                cd "\$COMPOSE_DIR" || exit 1
+                /usr/bin/docker compose restart "\$svc"
+            )
+            local rc=\$?
+            rm -f "\$staged"
+            if [ \$rc -eq 0 ]; then
+                echo "[ducky-restart-watcher] \$svc restarted (rc=0)"
+            else
+                echo "[ducky-restart-watcher] \$svc restart FAILED (rc=\$rc)"
+            fi
+        fi
+    fi
+}
+
+while true; do
+    handle_marker "\$MARKER_DIR/.restart_bchnode" "bchnode"
+    handle_marker "\$MARKER_DIR/.restart_web"     "web"
+    sleep 2
+done
+WATCHER
+    chmod 755 "/usr/local/bin/ducky-restart-watcher.sh"
+
+    cat > "/etc/systemd/system/ducky-restart-watcher.service" <<UNIT
+[Unit]
+Description=Ducky Pool — host-side restart watcher
+After=docker.service ${SERVICE_NAME}.service
+Requires=docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/ducky-restart-watcher.sh
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+    systemctl daemon-reload
+    systemctl enable --now ducky-restart-watcher.service
+    ok "Restart watcher installed and running"
+}
+
 print_summary() {
     local ip
     ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
@@ -357,4 +435,5 @@ fetch_app_files
 write_compose
 build_and_start
 install_systemd
+install_restart_watcher
 print_summary

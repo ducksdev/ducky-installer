@@ -387,6 +387,7 @@
       <span class="grow"></span>
       {% if not public %}
         <a class="nav" href="{{ url_for('public_view') }}" title="Public read-only view">View as public</a>
+        <a class="nav" href="{{ url_for('health_page') }}" title="System health">⚕ Health</a>
         <a class="nav" href="{{ url_for('settings_page') }}" title="Settings">⚙ Settings</a>
         {% if auth_enabled %}
           <form method="post" action="{{ url_for('logout') }}" style="display: inline; margin: 0;">
