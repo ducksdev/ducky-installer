@@ -95,7 +95,14 @@ start_ckpool() {
     envsubst < "$TEMPLATE" > "$CONF"
 
     echo "[entrypoint] starting ckpool..."
-    /usr/local/bin/ckpool -c "$CONF" &
+    # -L = log-shares: writes one file per share into
+    #   /var/log/ckpool/<pool-name>/shares/<block-height>/<workbase-id>.log
+    # The web app's share log tailer reads these to track real-time
+    # per-share difficulty, which the soft-reset display logic and the
+    # Discord webhook use for post-reset "next share is the new best"
+    # behaviour. Without -L, ckpool only flushes minute-aggregated
+    # bestshare snapshots, which misses sub-record shares entirely.
+    /usr/local/bin/ckpool -c "$CONF" -L &
     CKPOOL_PID=$!
     echo "[entrypoint] ckpool pid=$CKPOOL_PID"
 }

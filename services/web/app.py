@@ -370,6 +370,29 @@ def _read_worker_current_best(worker_id: str) -> float:
     return 0.0
 
 
+def _read_worker_current_shares(worker_id: str) -> int:
+    """Same idea as _read_worker_current_best but returns the shares
+    count. Used by reset_baseline to record a "reset_shares" snapshot
+    so the dashboard can detect when the worker has submitted a NEW
+    share after reset (regardless of whether it beats the old best)."""
+    if "." not in worker_id:
+        return 0
+    address = worker_id.split(".", 1)[0]
+    path = os.path.join(WORKERS_DIR, address)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = _load_json_loose(f.read()) or {}
+    except OSError:
+        return 0
+    for w in (data.get("worker") or []):
+        if isinstance(w, dict) and w.get("workername") == worker_id:
+            try:
+                return int(w.get("shares", 0) or 0)
+            except (TypeError, ValueError):
+                return 0
+    return 0
+
+
 def _discover_workers_from_disk() -> list[str]:
     """Walk every user file and return all workernames found in their
     `worker` arrays. Used so a 'Reset all bests' picks up workers we
@@ -396,10 +419,18 @@ def _discover_workers_from_disk() -> list[str]:
 
 def reset_baseline(worker_id: str | None) -> int:
     """Soft reset for a worker (or all workers when worker_id is None /
-    '__pool__'). Records ckpool's CURRENT bestshare as the
-    `reset_snapshot` so the dashboard hides the Best column until ckpool
-    reports a new value above the snapshot. Also resets the Discord
-    webhook baseline so a fresh ATH can fire a notification.
+    '__pool__'). Records snapshots of both ckpool's current bestshare
+    and shares count. The dashboard's get_workers() then:
+
+      - Hides the Best column until the worker submits a new share
+        (shares count > reset_shares).
+      - Tracks the highest share submitted POST-reset in a separate
+        post_reset_best field, so the displayed best climbs naturally
+        from the first new share — not from "must beat the old record".
+
+    This matches AxeBCH's behaviour: hit Reset, the next share counts
+    as the new best regardless of magnitude, and subsequent shares
+    only update the displayed best when they beat it.
 
     Does NOT restart ckpool or affect the miner connection. The hard
     pool-wide reset (which DOES restart ckpool) is in /stats/reset."""
@@ -413,16 +444,19 @@ def reset_baseline(worker_id: str | None) -> int:
             targets = [worker_id]
 
         for wid in targets:
-            current = _read_worker_current_best(wid)
-            if current <= 0:
+            current_best = _read_worker_current_best(wid)
+            current_shares = _read_worker_current_shares(wid)
+            if current_best <= 0:
                 # Worker hasn't reported a bestshare yet — fall back to
                 # whatever baseline we have so we don't spuriously fire
                 # a webhook when the first share arrives.
-                current = float(workers.get(wid, {}).get("best", 0))
+                current_best = float(workers.get(wid, {}).get("best", 0))
             workers[wid] = {
-                "best": current,
+                "best": current_best,            # Discord baseline ATH
                 "last_sent_ts": 0,
-                "reset_snapshot": current,  # hide Best until we beat this
+                "reset_snapshot": current_best,  # ckpool bestshare at reset
+                "reset_shares": current_shares,  # ckpool shares count at reset
+                "post_reset_best": 0.0,          # highest share seen post-reset
             }
 
         _save_baselines(data)
@@ -571,13 +605,40 @@ def get_workers() -> list[dict]:
             except (TypeError, ValueError):
                 ckpool_best = 0.0
 
-            # Apply soft-reset: if the worker has a baseline with a
-            # reset_snapshot, only show ckpool's bestshare if it's now
-            # greater than the snapshot. Otherwise the displayed Best
-            # is 0 — the user's reset hasn't been "beaten" yet.
+            # Per-worker soft-reset display logic:
+            #
+            # We track three values per worker in best_baselines.json:
+            #   reset_snapshot    : ckpool's bestshare at moment of reset
+            #   reset_shares      : ckpool's shares count at moment of reset
+            #   post_reset_best   : highest share difficulty observed
+            #                       SINCE the reset (set by the log tailer)
+            #
+            # The displayed Best is decided in this priority order:
+            #   1. If post_reset_best > 0  → show it (most accurate;
+            #      reflects real per-share diffs from ckpool's log)
+            #   2. Else if shares_count grew but log tailer hasn't seen
+            #      anything yet (e.g. log tailer disabled) → show
+            #      ckpool's bestshare if it now exceeds reset_snapshot
+            #   3. Else → show "—" (no new shares since reset)
             entry = baselines.get(workername) or {}
-            snap = float(entry.get("reset_snapshot", 0) or 0)
-            displayed_best = ckpool_best if ckpool_best > snap else 0.0
+            reset_snapshot = float(entry.get("reset_snapshot", 0) or 0)
+            reset_shares = int(entry.get("reset_shares", 0) or 0)
+            post_reset_best = float(entry.get("post_reset_best", 0) or 0)
+            current_shares = int(w.get("shares", 0) or 0)
+
+            if post_reset_best > 0:
+                displayed_best = post_reset_best
+            elif reset_snapshot > 0 and current_shares > reset_shares:
+                # Log tailer didn't pick up the share, but the shares
+                # count grew — fall back to ckpool's bestshare if it
+                # exceeded the snapshot (which means a new ATH happened)
+                displayed_best = ckpool_best if ckpool_best > reset_snapshot else 0.0
+            elif reset_snapshot == 0:
+                # Never reset — show ckpool's all-time bestshare directly
+                displayed_best = ckpool_best
+            else:
+                # Reset happened, no new shares seen yet
+                displayed_best = 0.0
 
             out.append({
                 "id": workername,
@@ -981,13 +1042,16 @@ def _check_and_fire(now_ts: int) -> None:
                             ts=now_ts,
                         )],
                     )
-                    workers[workername] = {
-                        "best": current,
-                        "last_sent_ts": now_ts if ok else last_sent,
-                    }
+                    # Preserve reset_snapshot/reset_shares/post_reset_best
+                    # — only update best + last_sent_ts.
+                    entry["best"] = current
+                    if ok:
+                        entry["last_sent_ts"] = now_ts
+                    workers[workername] = entry
                     changed = True
                 elif current > baseline:
-                    workers[workername] = {"best": current, "last_sent_ts": last_sent}
+                    entry["best"] = current
+                    workers[workername] = entry
                     changed = True
 
         if changed:
