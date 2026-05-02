@@ -388,6 +388,11 @@
       {% if not public %}
         <a class="nav" href="{{ url_for('public_view') }}" title="Public read-only view">View as public</a>
         <a class="nav" href="{{ url_for('settings_page') }}" title="Settings">⚙ Settings</a>
+        {% if auth_enabled %}
+          <form method="post" action="{{ url_for('logout') }}" style="display: inline; margin: 0;">
+            <button type="submit" class="nav" style="background: transparent; cursor: pointer; font-family: inherit;" title="Sign out">Sign out</button>
+          </form>
+        {% endif %}
       {% endif %}
     </div>
   </header>
@@ -1110,6 +1115,13 @@
   async function poll() {
     try {
       const r = await fetch(STATS_URL, { cache: 'no-store' });
+      if (r.status === 401) {
+        // Session expired — bounce to login. The login page preserves
+        // the originally-requested URL via ?next so we land back here
+        // after signing in.
+        window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname);
+        return;
+      }
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const data = await r.json();
       document.getElementById('node-body').innerHTML = renderNode(data.node);

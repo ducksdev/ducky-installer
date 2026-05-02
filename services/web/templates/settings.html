@@ -261,6 +261,70 @@
         </div>
       </div>
 
+      <!-- Dashboard auth (off by default — only relevant if exposing externally) -->
+      <div class="card" data-card="dashboard-auth" data-default-collapsed="true">
+        <header class="collapsible">
+          <h2>Dashboard auth
+            {% if settings.auth.enabled %}<span class="pill ok">On</span>
+            {% else %}<span class="pill dim">Off</span>{% endif %}
+          </h2>
+          <span class="chevron">▼</span>
+        </header>
+        <div class="body">
+          <p class="field-help" style="margin-bottom: 0.85rem;">
+            Optional single-password protection for the dashboard, settings, and admin actions.
+            The <span class="mono">/public</span> read-only view stays open regardless.
+          </p>
+          <div class="note" style="margin-bottom: 0.85rem;">
+            <span class="label">Heads up</span>
+            This is a fine defence against casual snooping on a LAN, but it is
+            <strong>not</strong> a substitute for TLS. If you expose this dashboard
+            to the internet, the password travels in plaintext over plain HTTP —
+            put it behind Tailscale, Cloudflare Tunnel, or an HTTPS reverse proxy first.
+          </div>
+
+          <div class="field">
+            <label class="checkbox-row" style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+              <input type="checkbox" id="auth_enabled" name="auth_enabled"
+                     {% if settings.auth.enabled %}checked{% endif %}
+                     style="width: auto; cursor: pointer;">
+              <span style="color: var(--fg); font-weight: 500; font-size: 0.92rem;">
+                Require login to access the dashboard
+              </span>
+            </label>
+          </div>
+
+          <div id="auth-fields" style="margin-top: 0.5rem;">
+            {% if settings.auth.enabled %}
+              <div class="field">
+                <label for="auth_current_password">Current password</label>
+                <input id="auth_current_password" name="auth_current_password" type="password"
+                       autocomplete="current-password" placeholder="Required to change password or disable auth">
+                <div class="field-help">Required to change password or disable auth.</div>
+              </div>
+            {% endif %}
+            <div class="field">
+              <label for="auth_new_password">
+                {% if settings.auth.enabled %}New password (leave blank to keep current){% else %}Password{% endif %}
+              </label>
+              <input id="auth_new_password" name="auth_new_password" type="password"
+                     autocomplete="new-password" placeholder="At least 6 characters">
+            </div>
+            <div class="field">
+              <label for="auth_new_password_confirm">Confirm password</label>
+              <input id="auth_new_password_confirm" name="auth_new_password_confirm" type="password"
+                     autocomplete="new-password" placeholder="Repeat the password">
+            </div>
+            <p class="field-help">
+              <strong>Forgot password recovery:</strong> SSH into the host, edit
+              <span class="mono">/var/lib/ducky-pool/shared/settings.json</span>,
+              set <span class="mono">"auth": {"enabled": false, "password_hash": ""}</span>,
+              then <span class="mono">sudo systemctl restart ducky-pool</span>.
+            </p>
+          </div>
+        </div>
+      </div>
+
       <!-- Discord (default expanded — most edited section) -->
       <div class="card" data-card="discord">
         <header class="collapsible">
@@ -300,6 +364,14 @@
         <a href="{{ url_for('index') }}">Cancel</a>
       </div>
     </form>
+
+    {% if settings.auth.enabled %}
+    <div class="actions-bar" style="justify-content: flex-end; margin-top: 0.5rem;">
+      <form method="post" action="{{ url_for('logout') }}" style="display: inline;">
+        <button type="submit" class="ghost">Sign out</button>
+      </form>
+    </div>
+    {% endif %}
 
     {% if settings.discord.webhook_url %}
       <div class="card" data-card="webhook-test" style="margin-top: 1.25rem;">
@@ -353,6 +425,21 @@
   }
   applyCollapseState();
   bindCollapseHandlers();
+
+  // ── auth toggle: show/hide password fields based on enable state ──
+  (function authFieldToggle() {
+    const cb = document.getElementById('auth_enabled');
+    const fields = document.getElementById('auth-fields');
+    if (!cb || !fields) return;
+    function update() {
+      // Hide password fields when disabling. The save handler deals
+      // with the no-password case (it leaves the existing hash alone
+      // and just flips enabled to false).
+      fields.style.display = cb.checked ? '' : 'none';
+    }
+    cb.addEventListener('change', update);
+    update();
+  })();
   </script>
 </body>
 </html>

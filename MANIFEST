@@ -8,6 +8,7 @@ services/web/requirements.txt
 services/web/app.py
 services/web/templates/index.html
 services/web/templates/settings.html
+services/web/templates/login.html
 
 services/ckpool/Dockerfile
 services/ckpool/ckpool.conf.template

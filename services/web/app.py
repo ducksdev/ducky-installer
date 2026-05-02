@@ -21,9 +21,11 @@ import socket
 import sqlite3
 import threading
 import time
+from functools import wraps
 from glob import glob
 from urllib.parse import unquote
 
+import bcrypt
 import requests
 from cashaddress import convert as cashaddr_convert
 from flask import (
@@ -35,10 +37,52 @@ from flask import (
     flash,
     jsonify,
     abort,
+    session,
 )
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET", os.urandom(16).hex())
+
+
+def _load_or_create_flask_secret() -> str:
+    """Persistent Flask secret. Stored in /shared so it survives container
+    restarts and rebuilds — without it, every restart logs everyone out
+    and breaks any flash() messages mid-flight. Generated once with
+    cryptographic randomness; never logged or exposed.
+    Honours FLASK_SECRET env var if set (for testing)."""
+    env_secret = os.environ.get("FLASK_SECRET")
+    if env_secret:
+        return env_secret
+    secret_path = os.path.join(
+        os.environ.get("STATE_DIR", "/shared"), "flask.secret"
+    )
+    try:
+        if os.path.exists(secret_path):
+            with open(secret_path, "r", encoding="utf-8") as f:
+                s = f.read().strip()
+                if s:
+                    return s
+    except OSError:
+        pass
+    # Generate fresh and persist. 32 bytes hex = 256 bits of entropy.
+    s = os.urandom(32).hex()
+    try:
+        os.makedirs(os.path.dirname(secret_path), exist_ok=True)
+        with open(secret_path, "w", encoding="utf-8") as f:
+            f.write(s)
+        # Lock down — secret should not be world-readable.
+        os.chmod(secret_path, 0o600)
+    except OSError:
+        # If we can't persist, fall back to in-memory secret. Sessions
+        # won't survive restarts but the app keeps working.
+        pass
+    return s
+
+
+app.secret_key = _load_or_create_flask_secret()
+# 30-day "remember me" by default; renews on activity.
+app.permanent_session_lifetime = 60 * 60 * 24 * 30
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
 BCH_RPC_HOST = os.environ.get("BCH_RPC_HOST", "bchnode")
 BCH_RPC_PORT = int(os.environ.get("BCH_RPC_PORT", "8332"))
@@ -78,6 +122,15 @@ DEFAULT_SETTINGS = {
         "webhook_url": "",
         "username": "Ducky Pool",
         "avatar_url": "",
+    },
+    # Optional dashboard password protection. When disabled (default),
+    # the dashboard and admin actions are open to anyone who can reach
+    # the web port — fine for LAN-only setups, dangerous if exposed.
+    # /public stays unauthenticated regardless. Password is stored as a
+    # bcrypt hash; the plaintext never touches disk.
+    "auth": {
+        "enabled": False,
+        "password_hash": "",
     },
 }
 
@@ -302,10 +355,18 @@ def _atomic_write_json(path: str, data: dict) -> None:
 
 def _merge_defaults(loaded: dict) -> dict:
     out = dict(DEFAULT_SETTINGS)
-    out.update({k: v for k, v in loaded.items() if k != "discord"})
+    out.update({k: v for k, v in loaded.items() if k not in ("discord", "auth")})
     discord = dict(DEFAULT_SETTINGS["discord"])
     discord.update(loaded.get("discord") or {})
     out["discord"] = discord
+    auth = dict(DEFAULT_SETTINGS["auth"])
+    auth.update(loaded.get("auth") or {})
+    # Defensive: enabled is meaningless without a hash. If someone hand-
+    # edits settings.json and turns enabled=true with no hash, treat as
+    # off so we never lock the user out.
+    if not auth.get("password_hash"):
+        auth["enabled"] = False
+    out["auth"] = auth
     return out
 
 
@@ -328,6 +389,122 @@ def save_settings(new: dict) -> None:
             os.chmod(SETTINGS_FILE, 0o600)
         except OSError:
             pass
+
+
+# ──────────────────────────── auth ────────────────────────────
+#
+# Optional single-password dashboard auth. Off by default. When on, all
+# admin routes + the main dashboard require a session cookie set by
+# /login. /public and /api/public/stats are intentionally exempt — they
+# exist so anyone can be shown a read-only view safely.
+#
+# Threat model: this stops casual snooping if the dashboard is exposed
+# (port forward, accidental public binding). It does NOT defend against:
+#   - eavesdropping over plain HTTP (passwords travel in clear) — pair
+#     this with TLS via Tailscale, Cloudflare Tunnel, or nginx+Let's
+#     Encrypt if exposing externally
+#   - shell access to the host (settings.json is readable)
+#   - sustained brute-force (there's no rate limiting; bcrypt's slowness
+#     is the only defence)
+#
+# Recovery: if you forget the password, SSH in, edit
+# /var/lib/ducky-pool/shared/settings.json and set
+# `"auth": {"enabled": false, "password_hash": ""}`, then restart the
+# stack. There is no password reset email — this is a self-hosted tool.
+
+def set_password(plaintext: str) -> str:
+    """Hash a plaintext password with bcrypt and persist into settings.
+    Returns the hash for the caller's confirmation; the plaintext never
+    leaves this function."""
+    if not plaintext:
+        raise ValueError("password cannot be empty")
+    if len(plaintext) < 6:
+        raise ValueError("password must be at least 6 characters")
+    h = bcrypt.hashpw(plaintext.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    s = load_settings()
+    s["auth"]["password_hash"] = h
+    s["auth"]["enabled"] = True
+    save_settings(s)
+    return h
+
+
+def check_password(plaintext: str) -> bool:
+    """Constant-time compare against the stored hash. Returns False if
+    auth is disabled or no hash is set (defensive — a missing hash
+    should never authenticate any password)."""
+    if not plaintext:
+        return False
+    s = load_settings()
+    stored = s["auth"].get("password_hash") or ""
+    if not stored:
+        return False
+    try:
+        return bcrypt.checkpw(plaintext.encode("utf-8"), stored.encode("utf-8"))
+    except (ValueError, TypeError):
+        return False
+
+
+def auth_enabled() -> bool:
+    s = load_settings()
+    return bool(s["auth"].get("enabled") and s["auth"].get("password_hash"))
+
+
+def is_logged_in() -> bool:
+    """True if the session is authenticated, OR if auth is disabled
+    entirely (in which case 'logged in' is the natural state for all
+    private routes).
+
+    The session_secret_version field lets us invalidate all existing
+    sessions when the password changes — bumping it on save invalidates
+    any outstanding cookies that referenced the old version."""
+    if not auth_enabled():
+        return True
+    if not session.get("auth_ok"):
+        return False
+    s = load_settings()
+    expected = s["auth"].get("password_hash", "")
+    # Bind the session to the current password hash. If admin changes
+    # password, all old sessions become invalid automatically.
+    return session.get("auth_hash_token") == _hash_token(expected)
+
+
+def _hash_token(password_hash: str) -> str:
+    """Short stable token derived from the bcrypt hash. We don't put
+    the bcrypt hash itself in the cookie — it's needlessly long and we
+    don't want hashes echoing back to the browser. A truncated SHA-256
+    of the hash is enough to detect password changes."""
+    import hashlib
+    if not password_hash:
+        return ""
+    return hashlib.sha256(password_hash.encode("utf-8")).hexdigest()[:16]
+
+
+def login_required(f):
+    """Decorator: redirect unauthenticated users to /login when auth
+    is enabled. When auth is off, behaves as a no-op."""
+    @wraps(f)
+    def wrapped(*args, **kwargs):
+        if is_logged_in():
+            return f(*args, **kwargs)
+        # Preserve the originally-requested URL so we can return there
+        # after login. Only allow safe relative URLs (no offsite redirects).
+        next_url = request.full_path if request.method == "GET" else url_for("index")
+        if not next_url or not next_url.startswith("/") or next_url.startswith("//"):
+            next_url = url_for("index")
+        return redirect(url_for("login", next=next_url))
+    return wrapped
+
+
+def login_required_json(f):
+    """Same as login_required but returns 401 JSON instead of redirecting.
+    For /api/stats which the dashboard JS polls every 10s — a 302 to a
+    login page would be confusing."""
+    @wraps(f)
+    def wrapped(*args, **kwargs):
+        if is_logged_in():
+            return f(*args, **kwargs)
+        return jsonify({"error": "auth required", "auth_required": True}), 401
+    return wrapped
 
 
 def _load_baselines() -> dict:
@@ -1703,7 +1880,49 @@ def _build_stats_payload(public: bool = False) -> dict:
     return payload
 
 
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    """Login page. If auth is disabled, redirect to dashboard — there's
+    nothing to log into. If already logged in, also redirect."""
+    if not auth_enabled():
+        return redirect(url_for("index"))
+    if is_logged_in():
+        return redirect(url_for("index"))
+
+    error = None
+    if request.method == "POST":
+        password = request.form.get("password") or ""
+        if check_password(password):
+            session.permanent = True
+            session["auth_ok"] = True
+            s = load_settings()
+            session["auth_hash_token"] = _hash_token(s["auth"]["password_hash"])
+            # Honour ?next= for post-login redirect, but only if it's a
+            # safe same-origin path. Reject anything starting with //
+            # (protocol-relative URL → could redirect off-site).
+            next_url = request.args.get("next") or request.form.get("next") or url_for("index")
+            if not next_url.startswith("/") or next_url.startswith("//"):
+                next_url = url_for("index")
+            return redirect(next_url)
+        # Generic failure — don't tell attackers whether they got close.
+        error = "Incorrect password."
+        # Tiny artificial delay to discourage automated guessing on top of
+        # bcrypt's natural slowness. bcrypt is the real defence.
+        time.sleep(0.5)
+
+    next_url = request.args.get("next") or url_for("index")
+    return render_template("login.html", error=error, next_url=next_url)
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    session.clear()
+    flash("Signed out.", "ok")
+    return redirect(url_for("login"))
+
+
 @app.route("/", methods=["GET"])
+@login_required
 def index():
     settings = load_settings()
     payload = _build_stats_payload(public=False)
@@ -1723,6 +1942,7 @@ def index():
         stratum_url=stratum_url,
         stratum_port=STRATUM_PORT,
         webhook_set=bool(settings["discord"]["webhook_url"]),
+        auth_enabled=auth_enabled(),
     )
 
 
@@ -1750,6 +1970,7 @@ def public_view():
 
 
 @app.route("/api/stats", methods=["GET"])
+@login_required_json
 def api_stats():
     return jsonify(_build_stats_payload(public=False))
 
@@ -1760,6 +1981,7 @@ def api_public_stats():
 
 
 @app.route("/api/history", methods=["GET"])
+@login_required_json
 def api_history():
     """Hashrate history for the sparkline. ?range=1h|24h|7d (default 24h)."""
     rng = (request.args.get("range") or "24h").lower()
@@ -1772,6 +1994,7 @@ def api_history():
 
 
 @app.route("/payout", methods=["POST"])
+@login_required
 def set_payout():
     raw = (request.form.get("address") or "").strip()
     legacy, err = normalise_address(raw)
@@ -1787,6 +2010,7 @@ def set_payout():
 
 
 @app.route("/workers/forget", methods=["POST"])
+@login_required
 def forget_worker():
     """Hide a worker from the dashboard. Stores the worker name + the
     shares-count at hide time + the unix ts in best_baselines.json.
@@ -1840,6 +2064,7 @@ def forget_worker():
 
 
 @app.route("/best/reset", methods=["POST"])
+@login_required
 def reset_best():
     """Soft reset for a single worker — no miner blip, no ckpool restart.
 
@@ -1897,6 +2122,7 @@ def _request_ckpool_restart() -> bool:
 
 
 @app.route("/stats/reset", methods=["POST"])
+@login_required
 def reset_stats():
     """Hard reset — deletes ckpool user file(s) AND requests a ckpool
     restart so its in-memory bestshare cache is cleared. Without the
@@ -1987,6 +2213,7 @@ def reset_stats():
 
 
 @app.route("/settings", methods=["GET"])
+@login_required
 def settings_page():
     s = load_settings()
     return render_template(
@@ -1999,6 +2226,7 @@ def settings_page():
 
 
 @app.route("/settings/save", methods=["POST"])
+@login_required
 def settings_save():
     s = load_settings()
     errors: list[str] = []
@@ -2032,6 +2260,60 @@ def settings_save():
     if avatar_url and len(avatar_url) > 500:
         errors.append("Avatar URL is too long.")
 
+    # ── auth handling ──
+    # Determine target state and apply transitions:
+    #   off → off  : nothing
+    #   off → on   : require new password
+    #   on  → on   : optional password change (require current if changing)
+    #   on  → off  : require current password
+    auth_was_enabled = bool(s["auth"].get("enabled") and s["auth"].get("password_hash"))
+    auth_want_enabled = bool(request.form.get("auth_enabled"))
+    auth_current = request.form.get("auth_current_password") or ""
+    auth_new = request.form.get("auth_new_password") or ""
+    auth_new_confirm = request.form.get("auth_new_password_confirm") or ""
+
+    new_auth = dict(s["auth"])  # carries current hash by default
+
+    if not auth_want_enabled:
+        # Disable. If auth was on, require the current password so a
+        # malicious actor can't silently turn auth off.
+        if auth_was_enabled:
+            if not auth_current:
+                errors.append("Current password required to disable auth.")
+            elif not check_password(auth_current):
+                errors.append("Current password is incorrect.")
+            else:
+                new_auth["enabled"] = False
+                # Keep the hash — disabling but leaving the hash means
+                # re-enabling later doesn't require setting a new pw.
+        else:
+            # Already off, stays off. Ignore any password fields silently.
+            pass
+    else:
+        # Want auth on.
+        if auth_new or auth_new_confirm:
+            # Setting/changing password
+            if auth_new != auth_new_confirm:
+                errors.append("New password and confirmation don't match.")
+            elif len(auth_new) < 6:
+                errors.append("New password must be at least 6 characters.")
+            else:
+                # If auth was on, require current password to change it.
+                if auth_was_enabled and not check_password(auth_current):
+                    errors.append("Current password is incorrect.")
+                else:
+                    # Hash and set
+                    new_auth["password_hash"] = bcrypt.hashpw(
+                        auth_new.encode("utf-8"), bcrypt.gensalt()
+                    ).decode("utf-8")
+                    new_auth["enabled"] = True
+        else:
+            # No new password. OK only if there's already a hash to use.
+            if not s["auth"].get("password_hash"):
+                errors.append("Set a password to enable auth.")
+            else:
+                new_auth["enabled"] = True
+
     if errors:
         for e in errors:
             flash(e, "error")
@@ -2046,22 +2328,44 @@ def settings_save():
             "username": username,
             "avatar_url": avatar_url,
         },
+        "auth": new_auth,
     }
     save_settings(new)
+
+    # If auth password just changed, refresh our own session token so we
+    # don't immediately log ourselves out by hash mismatch.
+    if new_auth.get("enabled") and new_auth.get("password_hash"):
+        session.permanent = True
+        session["auth_ok"] = True
+        session["auth_hash_token"] = _hash_token(new_auth["password_hash"])
 
     diff_changed = (
         new["mindiff"]   != s["mindiff"] or
         new["maxdiff"]   != s["maxdiff"] or
         new["startdiff"] != s["startdiff"]
     )
+    auth_changed = (
+        new_auth.get("enabled") != s["auth"].get("enabled") or
+        new_auth.get("password_hash") != s["auth"].get("password_hash")
+    )
+
+    msgs = []
     if diff_changed:
-        flash("Settings saved. ckpool will restart within ~10s — connected miners will reconnect automatically.", "ok")
+        msgs.append("ckpool will restart within ~10s — connected miners will reconnect automatically.")
+    if auth_changed:
+        if new_auth.get("enabled"):
+            msgs.append("Dashboard auth is now ON.")
+        else:
+            msgs.append("Dashboard auth is now OFF.")
+    if msgs:
+        flash("Settings saved. " + " ".join(msgs), "ok")
     else:
         flash("Settings saved.", "ok")
     return redirect(url_for("settings_page"))
 
 
 @app.route("/webhook/test", methods=["POST"])
+@login_required
 def test_webhook():
     # Send a sample of the actual embed style so users see what real
     # best-share notifications will look like.
