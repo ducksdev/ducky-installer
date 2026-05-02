@@ -212,6 +212,10 @@
       margin-top: 0.15rem; color: var(--fg);
     }
     .stat-value.accent { color: var(--accent); }
+    .stat-help {
+      font-size: 0.7rem; color: var(--muted); margin-top: 0.15rem;
+      font-family: ui-monospace, monospace;
+    }
     @media (max-width: 800px) { .stats.cols-4 { grid-template-columns: repeat(2, 1fr); } }
     @media (max-width: 420px) { .stats.cols-4, .stats { grid-template-columns: 1fr; } }
 
@@ -438,7 +442,13 @@
               {% if pool.ok %}
                 <div class="stats cols-4">
                   <div class="stat"><div class="stat-label">Hashrate</div><div class="stat-value accent">{{ pool.hashrate_1m }}</div></div>
-                  <div class="stat"><div class="stat-label">Workers</div><div class="stat-value">{{ pool.workers }} <span style="color: var(--muted); font-size: 0.78rem; font-weight: 400;">/ {{ pool.users }}</span></div></div>
+                  <div class="stat">
+                    <div class="stat-label">Workers</div>
+                    <div class="stat-value">{{ workers|length }}</div>
+                    <div class="stat-help" title="Workers = unique miner names. Connections = TCP sessions (a miner can have multiple). Users = unique BCH payout addresses.">
+                      {{ pool.connections }} conn · {{ pool.users }} user{% if pool.users != 1 %}s{% endif %}
+                    </div>
+                  </div>
                   <div class="stat"><div class="stat-label">Accepted</div><div class="stat-value">{{ "{:,}".format(pool.accepted) }}</div></div>
                   <div class="stat"><div class="stat-label">Best share</div><div class="stat-value">{{ pool.best_share }}</div></div>
                 </div>
@@ -791,7 +801,7 @@
       <div class="row"><span>Peers</span><span class="mono">${s.connections}</span></div>`;
   }
 
-  function renderPool(p, eta) {
+  function renderPool(p, eta, workerCount) {
     const pillEl = document.getElementById('pool-pill');
     if (!p.ok) {
       let msg = 'Could not read pool status.';
@@ -809,7 +819,13 @@
     return `
       <div class="stats cols-4">
         <div class="stat"><div class="stat-label">Hashrate</div><div class="stat-value accent">${escapeHtml(String(p.hashrate_1m))}</div></div>
-        <div class="stat"><div class="stat-label">Workers</div><div class="stat-value">${p.workers} <span style="color: var(--muted); font-size: 0.78rem; font-weight: 400;">/ ${p.users}</span></div></div>
+        <div class="stat">
+          <div class="stat-label">Workers</div>
+          <div class="stat-value">${workerCount}</div>
+          <div class="stat-help" title="Workers = unique miner names. Connections = TCP sessions (a miner can have multiple). Users = unique BCH payout addresses.">
+            ${p.connections != null ? p.connections : p.workers} conn · ${p.users} user${p.users === 1 ? '' : 's'}
+          </div>
+        </div>
         <div class="stat"><div class="stat-label">Accepted</div><div class="stat-value">${fmtInt(p.accepted)}</div></div>
         <div class="stat"><div class="stat-label">Best share</div><div class="stat-value">${fmtDiff(p.best_share)}</div></div>
       </div>${etaLine}${ageLine}`;
@@ -1126,7 +1142,7 @@
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const data = await r.json();
       document.getElementById('node-body').innerHTML = renderNode(data.node);
-      document.getElementById('pool-body').innerHTML = renderPool(data.pool, data.eta);
+      document.getElementById('pool-body').innerHTML = renderPool(data.pool, data.eta, (data.workers || []).length);
       document.getElementById('blocks-body').innerHTML = renderBlocks(data.blocks);
       document.getElementById('miners-body').innerHTML = renderWorkers(data.workers);
       // Duck-O-Meter grid — only present if there are workers.

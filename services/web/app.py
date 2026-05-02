@@ -1006,7 +1006,15 @@ def get_pool_stats() -> dict:
             "stale": age is not None and age > 120,
             "age_s": age,
             "users": data.get("Users", 0),
-            "workers": data.get("Workers", 0),
+            # ckpool's "Workers" field is actually a count of TCP
+            # connections — a single miner with 2 stratum sessions
+            # registers as 2 here. The dashboard previously labelled
+            # this as "Workers" which was confusing alongside the
+            # per-worker rows. We now expose it explicitly as
+            # `connections` and let the template render the count of
+            # unique worker names separately (computed by get_workers()).
+            "connections": data.get("Workers", 0),
+            "workers": data.get("Workers", 0),  # legacy alias
             "idle": data.get("Idle", 0),
             "disconnected": data.get("Disconnected", 0),
             "hashrate_1m": humanise_hashrate(data.get("hashrate1m")),
@@ -1077,7 +1085,14 @@ def get_workers() -> list[dict]:
                 continue
             display = workername.split(".", 1)[1] if "." in workername else workername
 
-            last = int(w.get("lastshare", 0) or 0)
+            last_userfile = int(w.get("lastshare", 0) or 0)
+            last_tailer = get_share_seen_ts(workername) or 0
+            # Use whichever is more recent. The tailer fires ~2s after
+            # an actual share lands; the user file lags up to 60s. The
+            # tailer is therefore the dominant signal for active miners,
+            # while the user file is the only signal we have for workers
+            # that connected before the share-tail thread started up.
+            last = max(last_userfile, last_tailer)
             age = (now - last) if last else None
 
             # Hidden filter: skip workers the user has Hidden, UNLESS
@@ -1953,6 +1968,24 @@ _share_tail_offsets: dict[str, int] = {}
 _share_tail_dir: str | None = None  # currently-active height dir
 _share_tail_lock = threading.Lock()
 
+# Per-worker last-share-seen timestamp populated by the tailer. The
+# user-file approach (reading lastshare from /users/<addr>) lags by up
+# to 60 seconds because ckpool only rewrites that file every minute.
+# This dict gets updated within ~2 seconds of a share landing — making
+# Online/Stale/Offline status accurate in near-real-time. Particularly
+# helpful for MRR-style proxied connections where the user file's
+# lastshare can easily fall behind reality.
+# Keyed by full worker id "addr.workername".
+_share_seen_ts: dict[str, int] = {}
+_share_seen_lock = threading.Lock()
+
+
+def get_share_seen_ts(worker_id: str) -> int | None:
+    """Return the most recent timestamp at which the share tailer saw
+    a share for this worker, or None if we've never seen one."""
+    with _share_seen_lock:
+        return _share_seen_ts.get(worker_id)
+
 
 def _find_active_share_dir() -> str | None:
     """Return the path of the height-directory that ckpool is currently
@@ -2010,6 +2043,12 @@ def _tail_share_line(line: str, now_ts: int) -> None:
         return
     if sdiff <= 0:
         return
+
+    # Record share-seen timestamp for accurate Online/Stale status.
+    # We do this before the baseline check below — even workers we
+    # haven't seen before should mark as freshly-active here.
+    with _share_seen_lock:
+        _share_seen_ts[workername] = now_ts
 
     # Update the worker's post_reset_best. We do this transactionally
     # under the existing _state_lock so we don't race with the user
