@@ -119,7 +119,7 @@ HISTORY_SAMPLE_INTERVAL = 60   # seconds between recorded snapshots
 DEFAULT_SETTINGS = {
     "mindiff": 1,
     "maxdiff": 0,        # 0 = unlimited
-    "startdiff": 42,
+    "startdiff": 1000,
     "discord": {
         "webhook_url": "",
         "username": "Ducky Pool",
@@ -2567,124 +2567,46 @@ def _request_ckpool_wipe() -> bool:
 @app.route("/stats/reset", methods=["POST"])
 @login_required
 def reset_stats():
-    """Hard reset — drops a wipe marker. The host watcher stops ckpool,
-    deletes user files + pool.status (clearing per-worker share counts
-    and pool-wide bestshare), then starts ckpool fresh. Without the
-    wipe step, ckpool's in-memory bestshare survives a regular restart
-    via state files on disk, making reset feel cosmetic.
+    """Soft reset — clears the displayed Best column for every worker
+    without disturbing ckpool, the worker list, hashrate history, or
+    miner connections.
 
-    Per-worker reset in this layout deletes the parent address user
-    file, which also clears OTHER workers under the same address —
-    in solo mode that's typically just one worker so it's fine. The
-    confirmation dialog warns about it.
+    Mirrors AxeBCH's reset behaviour: every worker stays visible with
+    its current hashrate / share count / last-seen, but the Best column
+    shows — until a fresh share lands. The next share counts as the
+    new best regardless of magnitude (the dashboard tracks
+    post_reset_best separately from ckpool's all-time bestshare),
+    and Discord webhooks fire fresh from there.
 
-    Miners briefly disconnect during the wipe (~10-15s) and reconnect
-    automatically.
+    Pool-wide bestshare on the dashboard is computed from per-worker
+    post_reset_best values, so it also goes to — until fresh shares
+    arrive. ckpool's own all-time bestshare lives in pool.status and
+    is unaffected — that's deliberate, since the user often wants the
+    historical record preserved while the dashboard's "since reset"
+    view starts fresh.
+
+    Per-worker Reset buttons (currently behind /stats/reset with a
+    name=) are deprecated in favour of a single pool-wide reset to
+    keep the UI clean. The route still accepts an individual worker
+    name for backward compatibility but treats it the same as a
+    pool-wide reset (since in solo mode all workers share one address).
     """
-    name = (request.form.get("name") or "").strip()
+    n = reset_baseline(None)
 
-    if name == "__pool__":
-        # Collect every worker ckpool currently knows about, so we can
-        # hide them all. Auto-unhide will bring them back the moment
-        # they submit a fresh share — but workers that don't reconnect
-        # (gone, broken, no longer subscribed) stay hidden, which is
-        # the user's intent: "reset" should mean a clean slate.
-        known_workers: list[str] = []
-        try:
-            if os.path.isdir(WORKERS_DIR):
-                for path in glob(os.path.join(WORKERS_DIR, "*")):
-                    try:
-                        with open(path, "r", encoding="utf-8") as f:
-                            user_data = _load_json_loose(f.read()) or {}
-                        for w in (user_data.get("worker") or []):
-                            if isinstance(w, dict):
-                                wn = w.get("workername", "")
-                                if wn and WORKER_ID_RE.match(wn):
-                                    known_workers.append(wn)
-                    except (OSError, ValueError):
-                        continue
-        except Exception as exc:  # noqa: BLE001
-            app.logger.warning("could not enumerate workers for hide-on-reset: %s", exc)
+    # Clear the tailer's per-worker share-seen cache so post_reset_best
+    # gets rebuilt cleanly from the next real share — otherwise an
+    # in-flight share that the tailer just observed could pre-populate
+    # post_reset_best before the dashboard repaints.
+    with _share_seen_lock:
+        _share_seen_ts.clear()
 
-        now = int(time.time())
-        with _state_lock:
-            state = _load_baselines()
-            state["workers"] = {}
-            # Hide all known workers. shares=0 so the auto-unhide on
-            # share-count-growth logic re-shows them as soon as ckpool
-            # registers a fresh share for that worker (which happens
-            # within seconds of reconnect).
-            hidden = state.setdefault("hidden", {})
-            for wn in known_workers:
-                hidden[wn] = {"ts": now, "shares": 0}
-            _save_baselines(state)
-
-        # Clear the tailer's share-seen cache so pre-reset share
-        # timestamps don't immediately satisfy the auto-unhide
-        # condition (last > hidden_at_ts) for workers that submitted
-        # a share moments before the user clicked Reset.
-        with _share_seen_lock:
-            _share_seen_ts.clear()
-
-        # Wipe the hashrate history DB too. Without this, the graph keeps
-        # showing the pre-reset period — often noisy/inflated while vardiff
-        # was still climbing — and the y-axis stays stretched, making fresh
-        # data look like a flat line at the bottom.
-        history_rows_cleared = 0
-        try:
-            with _db_lock:
-                conn = _open_db()
-                try:
-                    cur = conn.execute("DELETE FROM hashrate")
-                    history_rows_cleared = cur.rowcount or 0
-                    conn.commit()
-                finally:
-                    conn.close()
-        except Exception as exc:  # noqa: BLE001
-            app.logger.warning("could not clear history db: %s", exc)
-
-        wipe_ok = _request_ckpool_wipe()
-
-        bits = ["baselines cleared"]
-        if known_workers:
-            bits.append(f"{len(known_workers)} workers hidden — active ones will auto-reappear on next share")
-        if history_rows_cleared:
-            bits.append(f"history wiped ({history_rows_cleared} samples)")
-        if wipe_ok:
-            bits.append("ckpool wipe queued")
-        flash(
-            " · ".join(bits)
-            + ". Miners reconnect within ~15s; only the ones submitting fresh shares will show up.",
-            "ok",
-        )
-
-    else:
-        if not WORKER_ID_RE.match(name):
-            abort(400, "invalid worker name")
-        # In solo mode the per-worker reset is functionally identical to
-        # the pool-wide one — ckpool's restart wipes everything. We keep
-        # the per-worker button so the UI stays consistent and gives the
-        # user a clear "this row's reset" affordance.
-        address = name.split(".", 1)[0]
-
-        with _state_lock:
-            state = _load_baselines()
-            # Drop baselines for every worker under this address.
-            dropped = [k for k in state["workers"] if k.startswith(address + ".")]
-            for k in dropped:
-                state["workers"].pop(k, None)
-            if dropped:
-                _save_baselines(state)
-
-        _request_ckpool_wipe()
-
-        wname = name.split(".", 1)[1] if "." in name else name
-        flash(
-            f"Reset queued for {wname}. ckpool will be wiped and rebuild stats "
-            "from the next share. Miners reconnect within ~15s.",
-            "ok",
-        )
-
+    flash(
+        f"Reset complete. Best column cleared for {n} worker"
+        f"{'s' if n != 1 else ''}. The next share submitted by each "
+        "worker counts as the new best — Discord webhooks resume from there. "
+        "Miners stay connected, no shares are lost.",
+        "ok",
+    )
     return redirect(url_for("index"))
 
 

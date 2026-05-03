@@ -443,7 +443,7 @@
             <div class="actions">
               {% if not public %}
               <form method="post" action="{{ url_for('reset_stats') }}" style="display: inline;"
-                    onsubmit="event.stopPropagation(); return confirm('Reset all pool stats?\n\nThis stops ckpool, clears the displayed best share and per-worker share counts, then starts ckpool fresh. Miners briefly disconnect (~10–15s) and reconnect automatically.\n\nThis cannot be undone.');">
+                    onsubmit="event.stopPropagation(); return confirm('Reset best shares?\n\nThe Best column for every worker goes to —. The next share each worker submits counts as the new best, and Discord webhooks resume from there. Miners stay connected, no blip, no shares lost.');">
                 <input type="hidden" name="name" value="__pool__">
                 <button type="submit" class="ghost danger" onclick="event.stopPropagation();">Reset stats</button>
               </form>
@@ -567,11 +567,6 @@
                         {% if not public %}
                         <td>
                           <div class="row-actions">
-                            <form method="post" action="{{ url_for('reset_best') }}" style="display: inline;"
-                                  onsubmit="return confirm('Reset Best for {{ w.name }}?\n\nThe Best column will go to zero. New shares will rebuild the Best from there. Miner stays connected, no blip.');">
-                              <input type="hidden" name="name" value="{{ w.id }}">
-                              <button type="submit" class="ghost" title="Soft reset — no miner blip">Reset</button>
-                            </form>
                             <form method="post" action="{{ url_for('forget_worker') }}" style="display: inline;"
                                   onsubmit="return confirm('Hide worker {{ w.name }}?\n\nThe worker will disappear from the dashboard. It auto-reappears if it submits a new share. Miner stays connected, no blip.');">
                               <input type="hidden" name="name" value="{{ w.id }}">
@@ -962,17 +957,12 @@
 
   function workerActions(w) {
     if (PUBLIC_VIEW) return '';
-    const reset = `<form method="post" action="/best/reset" style="display: inline;"
-                          onsubmit="return confirm('Reset Best for ${escapeHtml(w.name)}?\\n\\nThe Best column will go to zero. New shares will rebuild the Best from there. Miner stays connected, no blip.');">
-                     <input type="hidden" name="name" value="${escapeHtml(w.id)}">
-                     <button type="submit" class="ghost" title="Soft reset — no miner blip">Reset</button>
-                   </form>`;
     const hide = `<form method="post" action="/workers/forget" style="display: inline;"
                          onsubmit="return confirm('Hide worker ${escapeHtml(w.name)}?\\n\\nThe worker will disappear from the dashboard. It auto-reappears if it submits a new share. Miner stays connected, no blip.');">
                     <input type="hidden" name="name" value="${escapeHtml(w.id)}">
                     <button type="submit" class="ghost" title="Hide from dashboard (auto-unhides if worker submits a new share)">Hide</button>
                   </form>`;
-    return reset + hide;
+    return hide;
   }
 
   function renderDuckOMeters(workers, netDiffHuman) {
