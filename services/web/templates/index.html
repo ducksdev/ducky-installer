@@ -539,7 +539,7 @@
                   <thead>
                     <tr>
                       <th>Worker</th><th>Status</th><th class="num">Hashrate</th>
-                      <th class="num">Shares</th><th class="num">Best</th>
+                      <th class="num">Best</th>
                       <th class="num">Last seen</th>
                       {% if not public %}<th></th>{% endif %}
                     </tr>
@@ -562,7 +562,6 @@
                           {% else %}<span class="pill dim">Offline</span>{% endif %}
                         </td>
                         <td class="num">{{ w.hashrate_1m }}</td>
-                        <td class="num">{{ "{:,}".format(w.shares) }}</td>
                         <td class="num">{{ w.best_share }}</td>
                         <td class="num">{{ w.age_human }}</td>
                         {% if not public %}
@@ -1012,7 +1011,6 @@
         <td class="worker-name">${escapeHtml(w.name)}${stage}</td>
         <td>${pill}</td>
         <td class="num">${escapeHtml(String(w.hashrate_1m))}</td>
-        <td class="num">${fmtInt(w.shares)}</td>
         <td class="num">${fmtDiff(w.best_share)}</td>
         <td class="num">${escapeHtml(humaniseAge(w.age_s))}</td>
         ${actionCell}
@@ -1022,7 +1020,7 @@
     const table = `<table class="miners">
       <thead><tr>
         <th>Worker</th><th>Status</th><th class="num">Hashrate</th>
-        <th class="num">Shares</th><th class="num">Best</th>
+        <th class="num">Best</th>
         <th class="num">Last seen</th>${adminCol}
       </tr></thead><tbody>${rows}</tbody></table>`;
 

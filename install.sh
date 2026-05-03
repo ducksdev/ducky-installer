@@ -500,7 +500,58 @@ handle_marker() {
     fi
 }
 
+# Pool-wide stats wipe. Different from a plain restart: we have to STOP
+# ckpool first, then delete the user files + pool.status (which contain
+# the bestshare cache + per-worker share counts), then START ckpool.
+# Doing it while ckpool is running is racey — ckpool's flush thread
+# rewrites the files faster than we can delete them. The dashboard
+# drops .restart_ckpool_wipe when the user clicks "Reset stats".
+handle_wipe_marker() {
+    local marker="\$MARKER_DIR/.restart_ckpool_wipe"
+    if [ -e "\$marker" ]; then
+        echo "[ducky-restart-watcher] ckpool WIPE+restart requested"
+        local stamp
+        stamp=\$(date +%s)
+        local staged="\$marker.processing.\$stamp"
+        if mv "\$marker" "\$staged" 2>/dev/null; then
+            (
+                cd "\$COMPOSE_DIR" || exit 1
+                /usr/bin/docker compose stop ckpool
+            )
+            # ckpool is now stopped — safe to delete state files.
+            local users_dir="\$DATA_DIR_HOST/ckpool/users"
+            local pool_status="\$DATA_DIR_HOST/ckpool/pool/pool.status"
+            local pool_users="\$DATA_DIR_HOST/ckpool/pool/users"
+            local pool_workers="\$DATA_DIR_HOST/ckpool/pool/workers"
+            if [ -d "\$users_dir" ]; then
+                find "\$users_dir" -mindepth 1 -maxdepth 1 -type f -delete 2>/dev/null || true
+                echo "[ducky-restart-watcher] cleared per-user files in \$users_dir"
+            fi
+            for f in "\$pool_status" "\$pool_users" "\$pool_workers"; do
+                if [ -f "\$f" ]; then
+                    rm -f "\$f"
+                    echo "[ducky-restart-watcher] removed \$f"
+                fi
+            done
+            # Re-render config in case settings changed since last start.
+            render_ckpool_config || true
+            (
+                cd "\$COMPOSE_DIR" || exit 1
+                /usr/bin/docker compose start ckpool
+            )
+            local rc=\$?
+            rm -f "\$staged"
+            if [ \$rc -eq 0 ]; then
+                echo "[ducky-restart-watcher] ckpool wiped + started (rc=0)"
+            else
+                echo "[ducky-restart-watcher] ckpool wipe-start FAILED (rc=\$rc)"
+            fi
+        fi
+    fi
+}
+
 while true; do
+    handle_wipe_marker
     handle_marker "\$MARKER_DIR/.restart_ckpool"  "ckpool"
     handle_marker "\$MARKER_DIR/.restart_bchnode" "bchnode"
     handle_marker "\$MARKER_DIR/.restart_web"     "web"

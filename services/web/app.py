@@ -2504,12 +2504,13 @@ def _safe_remove(path: str, base_dir: str) -> bool:
 
 
 def _request_ckpool_restart() -> bool:
-    """Drop the restart marker file. The ckpool entrypoint sees it next
-    loop tick (~5s), kills ckpool, deletes the marker, and restarts ckpool
-    fresh. Used to clear ckpool's in-memory bestshare cache after a wipe.
-    Returns True on success."""
+    """Drop the plain restart marker file. The host-side ducky-restart-
+    watcher service sees it next loop tick (~2s), re-renders ckpool.conf
+    from settings.json, and runs `docker compose restart ckpool`. ckpool
+    keeps its bestshare/user-file state across this kind of restart —
+    use it for config changes (mindiff/maxdiff/payout) only. Returns
+    True on success."""
     try:
-        # Touch creates the file with no content; only its existence matters.
         with open(RESTART_MARKER, "w", encoding="utf-8") as f:
             f.write(str(int(time.time())))
         return True
@@ -2518,32 +2519,43 @@ def _request_ckpool_restart() -> bool:
         return False
 
 
+def _request_ckpool_wipe() -> bool:
+    """Drop the WIPE marker. The host watcher stops ckpool, deletes
+    user files (per-worker share counts + bestshare) AND pool.status
+    (pool-wide bestshare cache), then starts ckpool fresh. This is the
+    only honest way to reset because ckpool keeps state in memory
+    while running — deleting files under a live ckpool just gets them
+    rewritten on the next flush. Returns True on success."""
+    marker_path = os.path.join(STATE_DIR, ".restart_ckpool_wipe")
+    try:
+        with open(marker_path, "w", encoding="utf-8") as f:
+            f.write(str(int(time.time())))
+        return True
+    except OSError as exc:
+        app.logger.warning("could not write wipe marker: %s", exc)
+        return False
+
+
 @app.route("/stats/reset", methods=["POST"])
 @login_required
 def reset_stats():
-    """Hard reset — deletes ckpool user file(s) AND requests a ckpool
-    restart so its in-memory bestshare cache is cleared. Without the
-    restart, ckpool would just rewrite the bestshare it remembers as soon
-    as it next ticks — making "Wipe" feel cosmetic.
+    """Hard reset — drops a wipe marker. The host watcher stops ckpool,
+    deletes user files + pool.status (clearing per-worker share counts
+    and pool-wide bestshare), then starts ckpool fresh. Without the
+    wipe step, ckpool's in-memory bestshare survives a regular restart
+    via state files on disk, making reset feel cosmetic.
 
-    Per-worker wipe in this layout deletes the worker's parent address
-    user file, which also clears all OTHER workers under the same address.
-    In solo mode that's typically just the one worker so it's fine, but the
+    Per-worker reset in this layout deletes the parent address user
+    file, which also clears OTHER workers under the same address —
+    in solo mode that's typically just one worker so it's fine. The
     confirmation dialog warns about it.
 
-    Miners briefly disconnect during the ckpool restart (~10s) and reconnect
+    Miners briefly disconnect during the wipe (~10-15s) and reconnect
     automatically.
     """
     name = (request.form.get("name") or "").strip()
 
     if name == "__pool__":
-        # Note: we no longer delete user files or pool.status here.
-        # Doing so while ckpool is still alive is racey — ckpool's flush
-        # would just rewrite them with current state, and on restart it
-        # would re-load that "fresh" file. The entrypoint now wipes those
-        # files AFTER ckpool exits, which is the only safe time. See
-        # services/ckpool/entrypoint.sh restart-marker block.
-
         with _state_lock:
             state = _load_baselines()
             state["workers"] = {}
@@ -2566,16 +2578,16 @@ def reset_stats():
         except Exception as exc:  # noqa: BLE001
             app.logger.warning("could not clear history db: %s", exc)
 
-        restart_ok = _request_ckpool_restart()
+        wipe_ok = _request_ckpool_wipe()
 
         bits = ["baselines cleared"]
         if history_rows_cleared:
             bits.append(f"history wiped ({history_rows_cleared} samples)")
-        if restart_ok:
-            bits.append("ckpool restart queued (state wipe will run after kill)")
+        if wipe_ok:
+            bits.append("ckpool wipe queued")
         flash(
             " · ".join(bits)
-            + ". Miners will reconnect within ~10s; the dashboard will rebuild stats from the next share.",
+            + ". Miners will reconnect within ~15s; the dashboard will rebuild stats from the next share.",
             "ok",
         )
 
@@ -2597,12 +2609,12 @@ def reset_stats():
             if dropped:
                 _save_baselines(state)
 
-        _request_ckpool_restart()
+        _request_ckpool_wipe()
 
         wname = name.split(".", 1)[1] if "." in name else name
         flash(
-            f"Reset queued for {wname}. ckpool will restart and rebuild stats "
-            "from the next share. Miner will reconnect within ~10s.",
+            f"Reset queued for {wname}. ckpool will be wiped and rebuild stats "
+            "from the next share. Miners reconnect within ~15s.",
             "ok",
         )
 
