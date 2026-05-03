@@ -148,7 +148,7 @@ ONLINE_SECONDS = 2 * 60
 STALE_SECONDS = 10 * 60
 
 WATCHER_INTERVAL = int(os.environ.get("WATCHER_INTERVAL", "15"))
-WEBHOOK_MIN_INTERVAL = int(os.environ.get("WEBHOOK_MIN_INTERVAL", "60"))
+WEBHOOK_MIN_INTERVAL = int(os.environ.get("WEBHOOK_MIN_INTERVAL", "15"))
 WEBHOOK_TIMEOUT = 10
 
 # ckpool with -L (--log-shares) writes one JSON line per accepted share to:
@@ -1726,12 +1726,16 @@ def _check_and_fire(now_ts: int) -> None:
 
                 # Apply the user-configured minimum share threshold.
                 # Shares below the floor are still tracked (we update
-                # the in-memory `best` value silently) so that when a
-                # share above the floor finally arrives, we don't
-                # spuriously fire on every micro-improvement that
-                # happened in between. We just don't WAKE Discord for
-                # them.
-                min_share = int(s["discord"].get("min_share") or 0)
+                # the in-memory `best` value silently) so when a share
+                # above the floor finally arrives, we don't fire on
+                # every micro-improvement that happened in between.
+                # We just don't WAKE Discord for them.
+                min_share_raw = s["discord"].get("min_share", 0)
+                try:
+                    min_share = int(min_share_raw or 0)
+                except (TypeError, ValueError):
+                    min_share = 0
+
                 if min_share > 0 and current < min_share:
                     if current > baseline:
                         entry["best"] = current
@@ -1739,27 +1743,75 @@ def _check_and_fire(now_ts: int) -> None:
                         changed = True
                     continue
 
-                if current > baseline and (now_ts - last_sent) >= WEBHOOK_MIN_INTERVAL:
+                # Rate-limit nuance: if a worker beats its record while
+                # the rate limit is active, we used to silently advance
+                # the baseline — which meant later, when the limit
+                # cleared, there was nothing pending to announce because
+                # baseline already matched the new record. So a flurry
+                # of records inside the rate-limit window produced ZERO
+                # webhooks instead of one summary webhook.
+                #
+                # The fix: when above-min AND above-baseline AND rate-
+                # limited, store the new record as `pending_announce`
+                # but DO NOT advance baseline. On the next tick, if the
+                # rate limit has cleared, fire with whatever the highest
+                # pending value is. This guarantees the user always
+                # learns about new records — they just may be batched
+                # to one webhook per rate-limit interval.
+                rate_limit_ok = (now_ts - last_sent) >= WEBHOOK_MIN_INTERVAL
+                pending = float(entry.get("pending_announce", 0) or 0)
+
+                if current > baseline:
+                    if rate_limit_ok:
+                        # Fire now. Use the larger of `current` or any
+                        # `pending_announce` (in case a bigger share
+                        # came earlier but was rate-limited).
+                        announce_value = max(current, pending)
+                        display = workername.split(".", 1)[1] if "." in workername else workername
+                        net_diff = get_network_difficulty()
+                        ok, _msg = _post_discord(
+                            content=None,
+                            embeds=[_build_best_share_embed(
+                                worker_name=display,
+                                current=announce_value,
+                                net_diff=net_diff,
+                                ts=now_ts,
+                            )],
+                        )
+                        entry["best"] = announce_value
+                        entry["pending_announce"] = 0  # clear, we just announced it
+                        if ok:
+                            entry["last_sent_ts"] = now_ts
+                        workers[workername] = entry
+                        changed = True
+                    else:
+                        # Rate-limited. Track the highest record seen
+                        # since the last fire, but don't move baseline
+                        # — that way the next non-rate-limited tick
+                        # still sees `current > baseline` and fires.
+                        if current > pending:
+                            entry["pending_announce"] = current
+                            workers[workername] = entry
+                            changed = True
+                elif pending > 0 and rate_limit_ok:
+                    # Edge case: worker stopped beating records but had
+                    # a pending value queued during a previous rate-limit
+                    # window. Fire that now.
                     display = workername.split(".", 1)[1] if "." in workername else workername
                     net_diff = get_network_difficulty()
                     ok, _msg = _post_discord(
                         content=None,
                         embeds=[_build_best_share_embed(
                             worker_name=display,
-                            current=current,
+                            current=pending,
                             net_diff=net_diff,
                             ts=now_ts,
                         )],
                     )
-                    # Preserve reset_snapshot/reset_shares/post_reset_best
-                    # — only update best + last_sent_ts.
-                    entry["best"] = current
+                    entry["best"] = pending
+                    entry["pending_announce"] = 0
                     if ok:
                         entry["last_sent_ts"] = now_ts
-                    workers[workername] = entry
-                    changed = True
-                elif current > baseline:
-                    entry["best"] = current
                     workers[workername] = entry
                     changed = True
 
@@ -2011,10 +2063,26 @@ def _tail_share_line(line: str, now_ts: int) -> None:
         if sdiff > prev_best:
             entry["best"] = sdiff
 
-        # Fire webhook if rate limit allows.
+        # Fire webhook if rate limit allows AND share meets the
+        # user-configured minimum threshold. The min-share check has to
+        # happen here too — the share tailer is a SEPARATE firing path
+        # from the minute watcher (_check_and_fire) and was previously
+        # missing the threshold check, so 1K-100K shares fired through
+        # this path even with min_share=100K configured. The threshold
+        # is a notification filter, not a tracking filter — we still
+        # update post_reset_best above so the dashboard's Best column
+        # reflects this share, we just don't WAKE Discord.
         s = load_settings()
         webhook_url = s["discord"]["webhook_url"]
-        will_fire = bool(webhook_url) and (now_ts - last_sent) >= WEBHOOK_MIN_INTERVAL
+        try:
+            min_share = int(s["discord"].get("min_share", 0) or 0)
+        except (TypeError, ValueError):
+            min_share = 0
+        will_fire = (
+            bool(webhook_url)
+            and (now_ts - last_sent) >= WEBHOOK_MIN_INTERVAL
+            and (min_share <= 0 or sdiff >= min_share)
+        )
 
         workers[workername] = entry
         _save_baselines(state)
