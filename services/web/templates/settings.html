@@ -357,6 +357,19 @@
                    placeholder="https://example.com/duck.png (optional)">
             <div class="field-help">Optional. PNG/JPG/GIF, square works best. Leave blank for the Discord default.</div>
           </div>
+          <div class="field">
+            <label for="min_share">Minimum share</label>
+            <input id="min_share" name="min_share" type="text" inputmode="text"
+                   value="{{ min_share_h }}"
+                   placeholder="0 (no threshold)">
+            <div class="field-help">
+              Only fire webhooks for shares ≥ this difficulty. Accepts shorthand
+              like <code>1M</code>, <code>500K</code>, <code>2.5G</code>. Leave
+              blank or <code>0</code> to fire on every new best (default).
+              Useful for cutting noise from small-share workers — e.g. set to
+              <code>1M</code> to skip "Decent splash" tier pings.
+            </div>
+          </div>
         </div>
       </div>
 

@@ -124,6 +124,14 @@ DEFAULT_SETTINGS = {
         "webhook_url": "",
         "username": "Ducky Pool",
         "avatar_url": "",
+        # Minimum share difficulty (raw int) before a webhook fires.
+        # 0 means "no threshold" — every new best ever fires a webhook
+        # (subject to first-sight + rate limit). Useful values:
+        #   1_000_000   skip "Decent splash" tier spam
+        #   10_000_000  skip everything below "Big splash"
+        # User sets this via the Settings page; we accept shorthand
+        # there and convert to raw int before storing.
+        "min_share": 0,
     },
     # Optional dashboard password protection. When disabled (default),
     # the dashboard and admin actions are open to anyone who can reach
@@ -1840,6 +1848,21 @@ def _check_and_fire(now_ts: int) -> None:
                 baseline = float(entry.get("best", 0))
                 last_sent = int(entry.get("last_sent_ts", 0))
 
+                # Apply the user-configured minimum share threshold.
+                # Shares below the floor are still tracked (we update
+                # the in-memory `best` value silently) so that when a
+                # share above the floor finally arrives, we don't
+                # spuriously fire on every micro-improvement that
+                # happened in between. We just don't WAKE Discord for
+                # them.
+                min_share = int(s["discord"].get("min_share") or 0)
+                if min_share > 0 and current < min_share:
+                    if current > baseline:
+                        entry["best"] = current
+                        workers[workername] = entry
+                        changed = True
+                    continue
+
                 if current > baseline and (now_ts - last_sent) >= WEBHOOK_MIN_INTERVAL:
                     display = workername.split(".", 1)[1] if "." in workername else workername
                     net_diff = get_network_difficulty()
@@ -2614,12 +2637,14 @@ def reset_stats():
 @login_required
 def settings_page():
     s = load_settings()
+    min_share_raw = int(s["discord"].get("min_share") or 0)
     return render_template(
         "settings.html",
         settings=s,
         mindiff_h=humanise_diff(s["mindiff"]) if s["mindiff"] else "1",
         maxdiff_h=humanise_diff(s["maxdiff"]) if s["maxdiff"] else "0",
         startdiff_h=humanise_diff(s["startdiff"]) if s["startdiff"] else "1",
+        min_share_h=humanise_diff(min_share_raw) if min_share_raw > 0 else "",
     )
 
 
@@ -2657,6 +2682,22 @@ def settings_save():
         errors.append("Avatar URL must start with http:// or https://")
     if avatar_url and len(avatar_url) > 500:
         errors.append("Avatar URL is too long.")
+
+    # Discord min-share threshold. Empty / 0 = "fire on every new best"
+    # (default behaviour). Larger values silence small-share noise.
+    # parse_diff handles '1M', '500K', '2.5G' shorthand; we accept raw
+    # integers too. Anything we can't parse becomes a validation error.
+    min_share_raw = (request.form.get("min_share") or "").strip()
+    if min_share_raw == "":
+        min_share = 0
+    else:
+        min_share, err = parse_diff(min_share_raw)
+        if err:
+            errors.append(f"Discord min share: {err}")
+            min_share = 0
+        elif min_share is None or min_share < 0:
+            errors.append("Discord min share must be ≥ 0 (use 0 to disable threshold).")
+            min_share = 0
 
     # ── auth handling ──
     # Determine target state and apply transitions:
@@ -2725,6 +2766,7 @@ def settings_save():
             "webhook_url": webhook_url,
             "username": username,
             "avatar_url": avatar_url,
+            "min_share": int(min_share or 0),
         },
         "auth": new_auth,
     }
