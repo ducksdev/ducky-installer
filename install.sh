@@ -160,11 +160,11 @@ render_ckpool_config() {
     if [ -f "$DATA_DIR/shared/settings.json" ]; then
         mindiff=$(python3 -c "import json,sys; print(json.load(open('$DATA_DIR/shared/settings.json')).get('mindiff', 1))" 2>/dev/null || echo 1)
         maxdiff=$(python3 -c "import json,sys; print(json.load(open('$DATA_DIR/shared/settings.json')).get('maxdiff', 0))" 2>/dev/null || echo 0)
-        startdiff=$(python3 -c "import json,sys; print(json.load(open('$DATA_DIR/shared/settings.json')).get('startdiff', 42))" 2>/dev/null || echo 42)
+        startdiff=$(python3 -c "import json,sys; print(json.load(open('$DATA_DIR/shared/settings.json')).get('startdiff', 1000))" 2>/dev/null || echo 1000)
     else
         mindiff=1
         maxdiff=0
-        startdiff=42
+        startdiff=1000
     fi
 
     # Payout address. ckpool refuses to start without a valid address, so
@@ -244,6 +244,11 @@ services:
       - -port=8333
       - -dbcache=512
       - -maxmempool=300
+      # ZMQ block notifications — ckpool subscribes to this to learn
+      # about new blocks instantly instead of RPC-polling every 100ms.
+      # AxeBCH uses 28334 by convention; we follow suit. The socket is
+      # only reachable on the docker network, no host port exposed.
+      - -zmqpubhashblock=tcp://0.0.0.0:28334
     ports:
       - "${P2P_PORT}:8333"
 
@@ -438,9 +443,9 @@ render_ckpool_config() {
     if [ -f "\$DATA_DIR_HOST/shared/settings.json" ]; then
         mindiff=\$(python3 -c "import json; print(json.load(open('\$DATA_DIR_HOST/shared/settings.json')).get('mindiff', 1))" 2>/dev/null || echo 1)
         maxdiff=\$(python3 -c "import json; print(json.load(open('\$DATA_DIR_HOST/shared/settings.json')).get('maxdiff', 0))" 2>/dev/null || echo 0)
-        startdiff=\$(python3 -c "import json; print(json.load(open('\$DATA_DIR_HOST/shared/settings.json')).get('startdiff', 42))" 2>/dev/null || echo 42)
+        startdiff=\$(python3 -c "import json; print(json.load(open('\$DATA_DIR_HOST/shared/settings.json')).get('startdiff', 1000))" 2>/dev/null || echo 1000)
     else
-        mindiff=1; maxdiff=0; startdiff=42
+        mindiff=1; maxdiff=0; startdiff=1000
     fi
     if [ -f "\$DATA_DIR_HOST/shared/payout.address" ]; then
         payout="\$(cat "\$DATA_DIR_HOST/shared/payout.address" | head -n 1 | tr -d '[:space:]')"

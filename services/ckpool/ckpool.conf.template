@@ -9,13 +9,12 @@
     ],
     "btcaddress": "${PAYOUT_ADDRESS}",
     "btcsig": "${POOL_SIG}",
-    "blockpoll": 100,
-    "update_interval": 30,
     "serverurl": [
         "0.0.0.0:${STRATUM_PORT}"
     ],
     "mindiff": ${MINDIFF},
-    "maxdiff": ${MAXDIFF},
     "startdiff": ${STARTDIFF},
-    "logdir": "/var/log/ckpool"
+    "maxdiff": ${MAXDIFF},
+    "logdir": "/var/log/ckpool",
+    "zmqblock": "tcp://${BCH_RPC_HOST}:28334"
 }
