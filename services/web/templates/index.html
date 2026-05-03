@@ -443,7 +443,7 @@
             <div class="actions">
               {% if not public %}
               <form method="post" action="{{ url_for('reset_stats') }}" style="display: inline;"
-                    onsubmit="event.stopPropagation(); return confirm('Reset all pool stats?\n\nThis restarts ckpool, which clears the displayed best share, accepted count, and hashrate averages. Miners briefly disconnect (~5–10s) and reconnect automatically.\n\nThis cannot be undone.');">
+                    onsubmit="event.stopPropagation(); return confirm('Reset all pool stats?\n\nThis stops ckpool, clears the displayed best share and per-worker share counts, then starts ckpool fresh. Miners briefly disconnect (~10–15s) and reconnect automatically.\n\nThis cannot be undone.');">
                 <input type="hidden" name="name" value="__pool__">
                 <button type="submit" class="ghost danger" onclick="event.stopPropagation();">Reset stats</button>
               </form>
@@ -463,7 +463,7 @@
                       {{ pool.connections }} conn · {{ pool.users }} user{% if pool.users != 1 %}s{% endif %}
                     </div>
                   </div>
-                  <div class="stat"><div class="stat-label">Accepted</div><div class="stat-value">{{ "{:,}".format(pool.accepted) }}</div></div>
+                  <div class="stat"><div class="stat-label">Net diff</div><div class="stat-value" title="Current Bitcoin Cash network difficulty. Your share has to beat this to find a block.">{{ net_diff_human or "—" }}</div></div>
                   <div class="stat"><div class="stat-label">Best share</div><div class="stat-value">{{ pool.best_share }}</div></div>
                 </div>
                 {% if eta and eta.ok %}
@@ -807,7 +807,7 @@
       <div class="row"><span>Peers</span><span class="mono">${s.connections}</span></div>`;
   }
 
-  function renderPool(p, eta, workerCount) {
+  function renderPool(p, eta, workerCount, netDiffHuman) {
     const pillEl = document.getElementById('pool-pill');
     if (!p.ok) {
       let msg = 'Could not read pool status.';
@@ -832,7 +832,7 @@
             ${p.connections != null ? p.connections : p.workers} conn · ${p.users} user${p.users === 1 ? '' : 's'}
           </div>
         </div>
-        <div class="stat"><div class="stat-label">Accepted</div><div class="stat-value">${fmtInt(p.accepted)}</div></div>
+        <div class="stat"><div class="stat-label">Net diff</div><div class="stat-value" title="Current Bitcoin Cash network difficulty. Your share has to beat this to find a block.">${escapeHtml(String(netDiffHuman || '—'))}</div></div>
         <div class="stat"><div class="stat-label">Best share</div><div class="stat-value">${fmtDiff(p.best_share)}</div></div>
       </div>${etaLine}${ageLine}`;
   }
@@ -1137,7 +1137,7 @@
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const data = await r.json();
       document.getElementById('node-body').innerHTML = renderNode(data.node);
-      document.getElementById('pool-body').innerHTML = renderPool(data.pool, data.eta, (data.workers || []).length);
+      document.getElementById('pool-body').innerHTML = renderPool(data.pool, data.eta, (data.workers || []).length, data.net_diff_human);
       document.getElementById('blocks-body').innerHTML = renderBlocks(data.blocks);
       document.getElementById('miners-body').innerHTML = renderWorkers(data.workers);
       // Duck-O-Meter grid — only present if there are workers.

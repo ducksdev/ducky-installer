@@ -1096,12 +1096,23 @@ def get_workers() -> list[dict]:
             age = (now - last) if last else None
 
             # Hidden filter: skip workers the user has Hidden, UNLESS
-            # they've submitted at least one new share since being hidden.
-            # We compare ckpool's current shares count against the count
-            # captured at hide-time. This works regardless of whether
-            # the worker was online, stale, or offline when hidden:
-            # the only signal that matters is "did they submit a NEW
-            # share after the user clicked Hide?"
+            # they've genuinely submitted a fresh share after being
+            # hidden. The primary signal is the lastshare timestamp:
+            # if the share-tail or the user file reports a lastshare
+            # newer than hidden_at_ts, the worker has actually checked
+            # in since the hide moment.
+            #
+            # We deliberately do NOT trust share-count growth as the
+            # primary signal because ckpool can reload cached state on
+            # restart that resurrects pre-hide share counts, and after a
+            # wipe-reset (where shares_at_hide is set to 0) any worker
+            # entry with shares >= 1 trivially passes the "grew" check —
+            # which would defeat the hide for every inactive miner that
+            # ckpool happens to remember. The timestamp comparison is
+            # more honest: monotonic in real time, immune to file-cache
+            # resurrection, can only succeed if a new share actually
+            # landed after the hide. share-count check is kept as a
+            # backup tie-breaker for boundary cases.
             hidden_meta = hidden.get(workername)
             if hidden_meta is not None:
                 shares_at_hide = (
@@ -1115,14 +1126,17 @@ def get_workers() -> list[dict]:
                     else hidden_meta  # legacy: scalar ts
                 )
                 current_shares = int(w.get("shares", 0) or 0)
-                # Two unhide signals (either is enough):
-                #   1. shares_count grew since hide  (most reliable)
-                #   2. lastshare timestamp is newer than hide_at_ts
-                #      (handles legacy entries that don't have shares_at_hide)
                 came_back = False
-                if shares_at_hide is not None and current_shares > shares_at_hide:
+                if hidden_at_ts is not None and last > hidden_at_ts:
                     came_back = True
-                elif hidden_at_ts is not None and last > hidden_at_ts:
+                elif (
+                    shares_at_hide is not None
+                    and shares_at_hide > 0
+                    and current_shares > shares_at_hide
+                ):
+                    # Backup: only trust share-count growth if hide-time
+                    # baseline was non-zero. Avoids the post-wipe
+                    # "0→1 = back online" trap.
                     came_back = True
                 if came_back:
                     auto_unhidden.append(workername)
@@ -1769,9 +1783,11 @@ def _check_and_fire(now_ts: int) -> None:
                 if not workername or not WORKER_ID_RE.match(workername):
                     continue
 
-                # Skip hidden workers UNLESS they've come back online
-                # since being hidden. Same logic as get_workers (shares
-                # count growth, or lastshare past hide-ts as a fallback).
+                # Skip hidden workers UNLESS they've genuinely come back
+                # online since being hidden. Primary signal is lastshare
+                # timestamp vs hide-ts (immune to ckpool state-cache
+                # resurrection); share-count growth is a backup that
+                # only fires if the hide-time baseline was non-zero.
                 hidden_meta = hidden.get(workername)
                 if hidden_meta is not None:
                     shares_at_hide = (
@@ -1786,10 +1802,22 @@ def _check_and_fire(now_ts: int) -> None:
                     )
                     cur_shares = int(w.get("shares", 0) or 0)
                     last = int(w.get("lastshare", 0) or 0)
+                    # Also consult the tailer-observed timestamp — it
+                    # updates within ~2s of every share, so a worker
+                    # actively mining will get past the hide before the
+                    # user file's lastshare catches up (which can lag
+                    # ~60s). This avoids a flicker where freshly-mining
+                    # workers stay hidden for a minute after restart.
+                    last_tailer = get_share_seen_ts(workername) or 0
+                    last_effective = max(last, last_tailer)
                     came_back = False
-                    if shares_at_hide is not None and cur_shares > shares_at_hide:
+                    if hidden_at_ts is not None and last_effective > hidden_at_ts:
                         came_back = True
-                    elif hidden_at_ts is not None and last > hidden_at_ts:
+                    elif (
+                        shares_at_hide is not None
+                        and shares_at_hide > 0
+                        and cur_shares > shares_at_hide
+                    ):
                         came_back = True
                     if not came_back:
                         continue
@@ -2556,10 +2584,47 @@ def reset_stats():
     name = (request.form.get("name") or "").strip()
 
     if name == "__pool__":
+        # Collect every worker ckpool currently knows about, so we can
+        # hide them all. Auto-unhide will bring them back the moment
+        # they submit a fresh share — but workers that don't reconnect
+        # (gone, broken, no longer subscribed) stay hidden, which is
+        # the user's intent: "reset" should mean a clean slate.
+        known_workers: list[str] = []
+        try:
+            if os.path.isdir(WORKERS_DIR):
+                for path in glob(os.path.join(WORKERS_DIR, "*")):
+                    try:
+                        with open(path, "r", encoding="utf-8") as f:
+                            user_data = _load_json_loose(f.read()) or {}
+                        for w in (user_data.get("worker") or []):
+                            if isinstance(w, dict):
+                                wn = w.get("workername", "")
+                                if wn and WORKER_ID_RE.match(wn):
+                                    known_workers.append(wn)
+                    except (OSError, ValueError):
+                        continue
+        except Exception as exc:  # noqa: BLE001
+            app.logger.warning("could not enumerate workers for hide-on-reset: %s", exc)
+
+        now = int(time.time())
         with _state_lock:
             state = _load_baselines()
             state["workers"] = {}
+            # Hide all known workers. shares=0 so the auto-unhide on
+            # share-count-growth logic re-shows them as soon as ckpool
+            # registers a fresh share for that worker (which happens
+            # within seconds of reconnect).
+            hidden = state.setdefault("hidden", {})
+            for wn in known_workers:
+                hidden[wn] = {"ts": now, "shares": 0}
             _save_baselines(state)
+
+        # Clear the tailer's share-seen cache so pre-reset share
+        # timestamps don't immediately satisfy the auto-unhide
+        # condition (last > hidden_at_ts) for workers that submitted
+        # a share moments before the user clicked Reset.
+        with _share_seen_lock:
+            _share_seen_ts.clear()
 
         # Wipe the hashrate history DB too. Without this, the graph keeps
         # showing the pre-reset period — often noisy/inflated while vardiff
@@ -2581,13 +2646,15 @@ def reset_stats():
         wipe_ok = _request_ckpool_wipe()
 
         bits = ["baselines cleared"]
+        if known_workers:
+            bits.append(f"{len(known_workers)} workers hidden — active ones will auto-reappear on next share")
         if history_rows_cleared:
             bits.append(f"history wiped ({history_rows_cleared} samples)")
         if wipe_ok:
             bits.append("ckpool wipe queued")
         flash(
             " · ".join(bits)
-            + ". Miners will reconnect within ~15s; the dashboard will rebuild stats from the next share.",
+            + ". Miners reconnect within ~15s; only the ones submitting fresh shares will show up.",
             "ok",
         )
 
