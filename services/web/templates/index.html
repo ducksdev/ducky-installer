@@ -308,52 +308,66 @@
       font-size: 0.7rem; color: var(--muted);
     }
 
-    /* ── Duck-O-Meter (headline cards above miners table) ───────── */
+    /* ── Duck-O-Meter (slim list above miners table) ────────────── */
     .duck-o-meters {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
-      gap: 0.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
     }
     .duck-card {
-      background: linear-gradient(180deg, rgba(91,138,166,0.04) 0%, rgba(249,168,37,0.03) 100%);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 0.85rem 1rem;
       display: grid;
-      grid-template-columns: 1fr;
-      gap: 0.45rem;
+      /* name | tier | pond bar | percentage — fixed widths so every
+         pond starts at the same x position regardless of name length. */
+      grid-template-columns: 160px 150px 1fr 90px;
+      align-items: center;
+      gap: 0.85rem;
+      padding: 0.55rem 0.5rem;
+      border-bottom: 1px solid var(--border);
     }
-    .duck-card .duck-head {
-      display: flex; align-items: baseline; justify-content: space-between;
-      gap: 0.5rem;
-    }
+    .duck-card:last-child { border-bottom: none; }
     .duck-card .duck-name {
-      font-size: 0.95rem; font-weight: 500; color: var(--fg);
+      font-size: 0.92rem; font-weight: 500; color: var(--fg);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .duck-card .duck-tier {
-      font-size: 0.82rem; color: var(--accent);
+      font-size: 0.8rem; color: var(--accent);
       font-weight: 500; letter-spacing: 0.01em;
-    }
-    .duck-card .duck-flavor {
-      font-size: 0.78rem; color: var(--muted); font-style: italic;
-      margin-top: -0.15rem;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .duck-card .duck-pond {
-      width: 100%; aspect-ratio: 14 / 1;
-      max-height: 56px;
-      border-radius: 8px; overflow: hidden;
+      width: 100%; height: 32px;
+      border-radius: 6px; overflow: hidden;
       background: linear-gradient(180deg, rgba(91,138,166,0.08), rgba(91,138,166,0.18));
       border: 1px solid rgba(91,138,166,0.18);
     }
     .duck-card .duck-pond svg { width: 100%; height: 100%; display: block; }
-    .duck-card .duck-stats {
-      display: flex; justify-content: space-between; gap: 0.5rem;
-      font-size: 0.78rem; color: var(--muted);
+    .duck-card .duck-pct {
+      font-size: 0.82rem; color: var(--accent); font-weight: 500;
       font-family: ui-monospace, monospace;
+      text-align: right;
     }
-    .duck-card .duck-stats .label { color: var(--muted); margin-right: 0.3rem; }
-    .duck-card .duck-stats .v { color: var(--fg); font-weight: 500; }
-    .duck-card .duck-stats .pct { color: var(--accent); font-weight: 500; }
+    /* Hide the duplicate "flavor text" / share+target cells (they live
+       in the Miners table now). */
+    .duck-card .duck-flavor,
+    .duck-card .duck-stats { display: none; }
+
+    /* On narrow screens, collapse to a 2-row layout per worker so
+       names don't truncate too aggressively but bars still align. */
+    @media (max-width: 720px) {
+      .duck-card {
+        grid-template-columns: 1fr 80px;
+        grid-template-rows: auto auto;
+        gap: 0.3rem 0.6rem;
+        padding: 0.6rem 0.4rem;
+      }
+      .duck-card .duck-name { grid-column: 1; grid-row: 1; }
+      .duck-card .duck-tier {
+        grid-column: 2; grid-row: 1;
+        text-align: right; font-size: 0.74rem;
+      }
+      .duck-card .duck-pond { grid-column: 1; grid-row: 2; height: 28px; }
+      .duck-card .duck-pct { grid-column: 2; grid-row: 2; }
+    }
 
     /* ── blocks ────────────────────────────────────────────────── */
     .blocks-empty {
@@ -499,19 +513,12 @@
             <div class="duck-o-meters" id="duck-o-meters-body">
               {% for w in workers %}
                 <div class="duck-card" data-worker="{{ w.id }}">
-                  <div class="duck-head">
-                    <span class="duck-name">{{ w.name }}</span>
-                    <span class="duck-tier">{{ w.stage_emoji }} {{ w.stage_label }}</span>
-                  </div>
-                  <span class="duck-flavor">{{ w.stage_flavor }}</span>
+                  <span class="duck-name">{{ w.name }}</span>
+                  <span class="duck-tier">{{ w.stage_emoji }} {{ w.stage_label }}</span>
                   <div class="duck-pond">
-                    {{ pond_svg(w.stage_level or 0, 360, 56, w.progress01 or 0) | safe }}
+                    {{ pond_svg(w.stage_level or 0, 240, 32, w.progress01 or 0) | safe }}
                   </div>
-                  <div class="duck-stats">
-                    <span><span class="label">Share</span><span class="v">{{ w.best_share }}</span></span>
-                    <span><span class="label">Target</span><span class="v">{{ net_diff_human or "—" }}</span></span>
-                    <span><span class="label">% to bread</span><span class="pct">{{ "%.4f"|format(w.progress_pct or 0) }}%</span></span>
-                  </div>
+                  <span class="duck-pct">{{ "%.4f"|format(w.progress_pct or 0) }}%</span>
                 </div>
               {% endfor %}
             </div>
@@ -971,29 +978,19 @@
 
   function renderDuckOMeters(workers, netDiffHuman) {
     if (!workers || !workers.length) return '';
-    const target = netDiffHuman || '—';
     return workers.map(w => {
       const tier = w.stage_label || 'Empty pond';
-      const flavor = w.stage_flavor || '';
       const emoji = w.stage_emoji || '🦆';
-      const share = w.best_share || '—';
       const pct = (w.progress_pct && w.progress_pct > 0)
         ? Number(w.progress_pct).toFixed(4) + '%'
         : '—';
       const level = w.stage_level || 0;
       const progress01 = (typeof w.progress01 === 'number') ? w.progress01 : 0;
       return `<div class="duck-card" data-worker="${escapeHtml(w.id)}">
-        <div class="duck-head">
-          <span class="duck-name">${escapeHtml(w.name)}</span>
-          <span class="duck-tier">${emoji} ${escapeHtml(tier)}</span>
-        </div>
-        <span class="duck-flavor">${escapeHtml(flavor)}</span>
-        <div class="duck-pond">${pondSVG(level, {width: 360, height: 56, progress01: progress01})}</div>
-        <div class="duck-stats">
-          <span><span class="label">Share</span><span class="v">${escapeHtml(String(share))}</span></span>
-          <span><span class="label">Target</span><span class="v">${escapeHtml(String(target))}</span></span>
-          <span><span class="label">% to bread</span><span class="pct">${pct}</span></span>
-        </div>
+        <span class="duck-name">${escapeHtml(w.name)}</span>
+        <span class="duck-tier">${emoji} ${escapeHtml(tier)}</span>
+        <div class="duck-pond">${pondSVG(level, {width: 240, height: 32, progress01: progress01})}</div>
+        <span class="duck-pct">${pct}</span>
       </div>`;
     }).join('');
   }
