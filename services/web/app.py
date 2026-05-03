@@ -144,8 +144,8 @@ DEFAULT_SETTINGS = {
     },
 }
 
-ONLINE_SECONDS = 2 * 60
-STALE_SECONDS = 10 * 60
+ONLINE_SECONDS = 10 * 60
+STALE_SECONDS = 30 * 60
 
 WATCHER_INTERVAL = int(os.environ.get("WATCHER_INTERVAL", "15"))
 WEBHOOK_MIN_INTERVAL = int(os.environ.get("WEBHOOK_MIN_INTERVAL", "15"))
@@ -1228,6 +1228,7 @@ def get_workers() -> list[dict]:
                 ),
                 "shares": w.get("shares", 0),
                 "best_share": humanise_diff(displayed_best) if displayed_best > 0 else "—",
+                "best_share_raw": displayed_best,
                 "stage_level": stage["level"],
                 "stage_label": stage["label"],
                 "stage_flavor": stage["flavor"],
@@ -2233,10 +2234,32 @@ def _build_stats_payload(public: bool = False) -> dict:
     pool_hashrate_hs = _hashrate_str_to_float(pool.get("hashrate_1m")) if pool.get("ok") else None
     eta = block_eta(pool_hashrate_hs, net_diff)
 
+    workers = get_workers()
+
+    # Override pool best_share with the max of per-worker displayed
+    # bests. This makes Reset stats actually clear the Pool stats
+    # Best share value too — without this, ckpool's own all-time
+    # bestshare keeps showing because it lives in pool.status which
+    # the soft reset deliberately doesn't touch.
+    #
+    # Ties pool best to dashboard semantics: show the highest "since
+    # reset" share across all visible workers. When no worker has
+    # post_reset_best set yet, falls back to "—".
+    if pool.get("ok"):
+        worker_bests = [
+            float(w.get("best_share_raw", 0) or 0)
+            for w in workers
+        ]
+        max_worker_best = max(worker_bests) if worker_bests else 0.0
+        if max_worker_best > 0:
+            pool["best_share"] = humanise_diff(max_worker_best)
+        else:
+            pool["best_share"] = "—"
+
     payload = {
         "node": get_node_status(),
         "pool": pool,
-        "workers": get_workers(),
+        "workers": workers,
         "blocks": blocks,
         "eta": eta,
         "now": int(time.time()),
