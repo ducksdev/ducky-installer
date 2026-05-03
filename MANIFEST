@@ -11,6 +11,4 @@ services/web/templates/settings.html
 services/web/templates/login.html
 services/web/templates/health.html
 
-services/ckpool/Dockerfile
 services/ckpool/ckpool.conf.template
-services/ckpool/entrypoint.sh

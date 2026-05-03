@@ -77,6 +77,21 @@ fetch_or_copy() {
 
 #────────────────────────────── steps ──────────────────────────────#
 
+ensure_dependencies() {
+    # Quick check + install for tools we need outside Docker. envsubst is
+    # used to render ckpool.conf from the template; python3 to parse the
+    # rendered config and the user's settings.json.
+    local missing=()
+    command -v envsubst >/dev/null 2>&1 || missing+=("gettext-base")
+    command -v python3 >/dev/null 2>&1 || missing+=("python3")
+    if [ ${#missing[@]} -gt 0 ]; then
+        step "Installing host helpers (${missing[*]})"
+        apt-get update -y -qq >/dev/null 2>&1 || true
+        apt-get install -y -qq "${missing[@]}" >/dev/null 2>&1
+        ok "Host helpers installed"
+    fi
+}
+
 install_docker() {
     if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
         ok "Docker + Compose already installed"
@@ -114,6 +129,7 @@ create_dirs() {
         "$INSTALL_DIR/services/ckpool" \
         "$DATA_DIR/bchnode" \
         "$DATA_DIR/ckpool" \
+        "$DATA_DIR/ckpool-config" \
         "$DATA_DIR/shared"
     ok "Layout ready under $INSTALL_DIR and $DATA_DIR"
 }
@@ -128,6 +144,72 @@ generate_secrets() {
     else
         ok "RPC password already exists, leaving it alone"
     fi
+}
+
+render_ckpool_config() {
+    step "Rendering ckpool config"
+    local rpc_pass
+    rpc_pass="$(cat "$DATA_DIR/rpc.pass")"
+
+    # Read settings from settings.json if it exists, otherwise use sensible
+    # defaults. Users tune these in the dashboard's Settings page; the web
+    # app rewrites settings.json and re-runs the render. On fresh install
+    # there's no settings.json yet — defaults below match DEFAULT_SETTINGS
+    # in app.py.
+    local mindiff maxdiff startdiff
+    if [ -f "$DATA_DIR/shared/settings.json" ]; then
+        mindiff=$(python3 -c "import json,sys; print(json.load(open('$DATA_DIR/shared/settings.json')).get('mindiff', 1))" 2>/dev/null || echo 1)
+        maxdiff=$(python3 -c "import json,sys; print(json.load(open('$DATA_DIR/shared/settings.json')).get('maxdiff', 0))" 2>/dev/null || echo 0)
+        startdiff=$(python3 -c "import json,sys; print(json.load(open('$DATA_DIR/shared/settings.json')).get('startdiff', 42))" 2>/dev/null || echo 42)
+    else
+        mindiff=1
+        maxdiff=0
+        startdiff=42
+    fi
+
+    # Payout address. ckpool refuses to start without a valid address, so
+    # we fall back to a clearly-fake-looking address on fresh installs —
+    # the user MUST set their real address before any mining can happen.
+    # The dashboard's set_payout handler updates this file and re-renders.
+    local payout
+    if [ -f "$DATA_DIR/shared/payout.address" ]; then
+        payout="$(cat "$DATA_DIR/shared/payout.address" | head -n 1 | tr -d '[:space:]')"
+    fi
+    if [ -z "${payout:-}" ]; then
+        # Bitcoin Cash genesis address — placeholder. ckpool will accept it
+        # syntactically but the user MUST change before mining or all
+        # rewards go nowhere. The dashboard surfaces this as a big red
+        # warning on the Payout card until they set a real address.
+        payout="1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+    fi
+
+    # Substitute into template and write to a temp file first so we
+    # never leave a half-written config on disk if envsubst fails.
+    local template="$INSTALL_DIR/services/ckpool/ckpool.conf.template"
+    local tmp="$DATA_DIR/ckpool-config/ckpool.conf.tmp"
+    local out="$DATA_DIR/ckpool-config/ckpool.conf"
+
+    BCH_RPC_HOST=bchnode \
+    BCH_RPC_PORT=8332 \
+    BCH_RPC_USER=bchrpc \
+    BCH_RPC_PASS="$rpc_pass" \
+    STRATUM_PORT="$STRATUM_PORT" \
+    PAYOUT_ADDRESS="$payout" \
+    POOL_SIG="/ducky-pool/" \
+    MINDIFF="$mindiff" \
+    MAXDIFF="$maxdiff" \
+    STARTDIFF="$startdiff" \
+    envsubst < "$template" > "$tmp"
+
+    # Sanity check the rendered config is valid JSON before swapping it in.
+    if ! python3 -m json.tool < "$tmp" >/dev/null 2>&1; then
+        rm -f "$tmp"
+        echo "  ✗ Rendered ckpool.conf is not valid JSON — refusing to install" >&2
+        exit 1
+    fi
+    mv "$tmp" "$out"
+    chmod 644 "$out"
+    ok "ckpool config rendered to $out (mindiff=$mindiff maxdiff=$maxdiff startdiff=$startdiff)"
 }
 
 write_compose() {
@@ -166,27 +248,34 @@ services:
       - "${P2P_PORT}:8333"
 
   ckpool:
-    build: ./services/ckpool
-    image: ducky-ckpool:local
+    image: ghcr.io/willitmod/wim-solo-ckpool:0.8.3-rc1-590fb2a
     container_name: ducky-ckpool
     restart: unless-stopped
     stop_grace_period: 30s
-    environment:
-      BCH_RPC_HOST: bchnode
-      BCH_RPC_PORT: 8332
-      BCH_RPC_USER: bchrpc
-      BCH_RPC_PASS: ${rpc_pass}
-      STRATUM_PORT: ${STRATUM_PORT}
-      PAYOUT_ADDRESS_FILE: /shared/payout.address
-      POOL_SIG: "/ducky-pool/"
+    # ckpool.conf is rendered by install.sh into ${DATA_DIR}/ckpool-config
+    # and bind-mounted read-only here. To change settings: edit
+    # ${DATA_DIR}/shared/settings.json (or use the dashboard) and the web
+    # container's settings handler re-renders the config + drops the
+    # .restart_ckpool marker. The host-side ducky-restart-watcher then
+    # runs `docker compose restart ckpool` which picks up the new file.
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        # Stale pid file recovery — if Docker restarts our container
+        # without recreating its writable layer, /tmp/ckpool/*.pid can
+        # linger and block startup. Same trick AxeBCH uses.
+        rm -f /tmp/ckpool/*.pid 2>/dev/null || true
+        # ckpool flags: -k killold, -B BTCSOLO mode, -L log shares
+        if command -v ckpool >/dev/null 2>&1; then
+          exec ckpool -k -B -L -c /config/ckpool.conf
+        elif [ -x /usr/bin/ckpool ]; then
+          exec /usr/bin/ckpool -k -B -L -c /config/ckpool.conf
+        else
+          echo "ckpool binary not found in image"; exit 1
+        fi
     volumes:
-      # /shared is rw because ckpool's entrypoint needs to delete the
-      # restart marker file dropped by the web container when the user
-      # clicks Reset stats. Earlier versions had this as :ro which broke
-      # Reset entirely — see git history. Don't change to :ro without
-      # also moving the restart-marker mechanism somewhere else.
-      - ${DATA_DIR}/shared:/shared:rw
-      - ${DATA_DIR}/ckpool:/var/log/ckpool
+      - ${DATA_DIR}/ckpool-config:/config:ro
+      - ${DATA_DIR}/ckpool:/var/log/ckpool:rw
     ports:
       - "${STRATUM_PORT}:${STRATUM_PORT}"
     depends_on:
@@ -282,23 +371,20 @@ build_and_start() {
     ok "Containers started"
 
     step "Verifying mount config"
-    # Sanity check: ckpool MUST have /shared mounted read-write. If it
-    # comes up read-only (because someone edited the compose by hand,
-    # or because of a Docker bug), Reset stats and the auto-restart
-    # mechanism break silently. Fail loudly here so the user notices.
+    # Sanity check: ckpool's config file must be readable in the
+    # container. The dashboard renders config changes onto the host's
+    # ckpool-config dir; if the bind-mount didn't take, ckpool would
+    # silently keep using whatever config it had at startup.
     sleep 2
-    local rw_status
-    rw_status="$(docker inspect ducky-ckpool \
-        --format '{{range .Mounts}}{{if eq .Destination "/shared"}}{{.RW}}{{end}}{{end}}' \
-        2>/dev/null || true)"
-    if [ "$rw_status" = "true" ]; then
-        ok "ckpool /shared is read-write (as required)"
+    local conf_present
+    conf_present="$(docker exec ducky-ckpool sh -c 'test -r /config/ckpool.conf && echo yes' 2>/dev/null || true)"
+    if [ "$conf_present" = "yes" ]; then
+        ok "ckpool config mount is healthy"
     else
         echo
-        c_red "✗ FATAL: ckpool /shared is mounted read-only (or container missing)"
-        echo "  Reset stats and Discord webhooks will not work in this state."
-        echo "  Inspect with: sudo docker inspect ducky-ckpool"
-        echo "  Then re-run install.sh after fixing /opt/ducky-pool/docker-compose.yml"
+        c_red "✗ FATAL: ckpool cannot read /config/ckpool.conf"
+        echo "  Check that ${DATA_DIR}/ckpool-config/ckpool.conf exists and is readable."
+        echo "  Inspect with: sudo docker logs ducky-ckpool"
         exit 1
     fi
 }
@@ -330,27 +416,75 @@ UNIT
 install_restart_watcher() {
     # Watches the marker dir (/shared on the host = $DATA_DIR/shared)
     # for .restart_<service> files dropped by the dashboard, then runs
-    # `docker compose restart <service>`. ckpool has its own internal
-    # marker handler in entrypoint.sh, so this watcher only handles
-    # bchnode and web restarts.
+    # `docker compose restart <service>`. For ckpool we ALSO re-render
+    # the ckpool.conf from the latest settings.json before restarting,
+    # so config changes (mindiff/maxdiff/startdiff/payout) take effect.
     step "Installing host-side restart watcher"
     cat > "/usr/local/bin/ducky-restart-watcher.sh" <<WATCHER
 #!/usr/bin/env bash
 set -u
 MARKER_DIR="${DATA_DIR}/shared"
 COMPOSE_DIR="${INSTALL_DIR}"
+DATA_DIR_HOST="${DATA_DIR}"
+TEMPLATE="${INSTALL_DIR}/services/ckpool/ckpool.conf.template"
+STRATUM_PORT_HOST="${STRATUM_PORT}"
 mkdir -p "\$MARKER_DIR"
+
+# Re-render ckpool.conf from settings.json + payout.address. Mirrors
+# render_ckpool_config() in install.sh — keep in sync if you change one.
+render_ckpool_config() {
+    local rpc_pass mindiff maxdiff startdiff payout
+    rpc_pass="\$(cat "\$DATA_DIR_HOST/rpc.pass")"
+    if [ -f "\$DATA_DIR_HOST/shared/settings.json" ]; then
+        mindiff=\$(python3 -c "import json; print(json.load(open('\$DATA_DIR_HOST/shared/settings.json')).get('mindiff', 1))" 2>/dev/null || echo 1)
+        maxdiff=\$(python3 -c "import json; print(json.load(open('\$DATA_DIR_HOST/shared/settings.json')).get('maxdiff', 0))" 2>/dev/null || echo 0)
+        startdiff=\$(python3 -c "import json; print(json.load(open('\$DATA_DIR_HOST/shared/settings.json')).get('startdiff', 42))" 2>/dev/null || echo 42)
+    else
+        mindiff=1; maxdiff=0; startdiff=42
+    fi
+    if [ -f "\$DATA_DIR_HOST/shared/payout.address" ]; then
+        payout="\$(cat "\$DATA_DIR_HOST/shared/payout.address" | head -n 1 | tr -d '[:space:]')"
+    fi
+    [ -z "\${payout:-}" ] && payout="1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+
+    local tmp="\$DATA_DIR_HOST/ckpool-config/ckpool.conf.tmp"
+    local out="\$DATA_DIR_HOST/ckpool-config/ckpool.conf"
+    BCH_RPC_HOST=bchnode \\
+    BCH_RPC_PORT=8332 \\
+    BCH_RPC_USER=bchrpc \\
+    BCH_RPC_PASS="\$rpc_pass" \\
+    STRATUM_PORT="\$STRATUM_PORT_HOST" \\
+    PAYOUT_ADDRESS="\$payout" \\
+    POOL_SIG="/ducky-pool/" \\
+    MINDIFF="\$mindiff" \\
+    MAXDIFF="\$maxdiff" \\
+    STARTDIFF="\$startdiff" \\
+    envsubst < "\$TEMPLATE" > "\$tmp"
+    if python3 -m json.tool < "\$tmp" >/dev/null 2>&1; then
+        mv "\$tmp" "\$out"
+        chmod 644 "\$out"
+        echo "[ducky-restart-watcher] re-rendered ckpool.conf (min=\$mindiff max=\$maxdiff start=\$startdiff)"
+        return 0
+    else
+        rm -f "\$tmp"
+        echo "[ducky-restart-watcher] ckpool.conf render FAILED (invalid JSON) — keeping old config"
+        return 1
+    fi
+}
 
 handle_marker() {
     local marker="\$1"
     local svc="\$2"
     if [ -e "\$marker" ]; then
         echo "[ducky-restart-watcher] \$svc restart requested"
-        # Stage the marker so we don't loop if compose exits non-zero.
         local stamp
         stamp=\$(date +%s)
         local staged="\$marker.processing.\$stamp"
         if mv "\$marker" "\$staged" 2>/dev/null; then
+            # ckpool needs a fresh-rendered config before restart.
+            if [ "\$svc" = "ckpool" ]; then
+                render_ckpool_config || true
+            fi
             (
                 cd "\$COMPOSE_DIR" || exit 1
                 /usr/bin/docker compose restart "\$svc"
@@ -367,6 +501,7 @@ handle_marker() {
 }
 
 while true; do
+    handle_marker "\$MARKER_DIR/.restart_ckpool"  "ckpool"
     handle_marker "\$MARKER_DIR/.restart_bchnode" "bchnode"
     handle_marker "\$MARKER_DIR/.restart_web"     "web"
     sleep 2
@@ -429,10 +564,12 @@ detect_local_clone
 step "Source mode: $SOURCE_MODE"
 
 install_docker
+ensure_dependencies
 create_dirs
 generate_secrets
 fetch_app_files
 write_compose
+render_ckpool_config
 build_and_start
 install_systemd
 install_restart_watcher

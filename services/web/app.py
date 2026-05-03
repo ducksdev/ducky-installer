@@ -2376,11 +2376,33 @@ def set_payout():
     if err or not legacy:
         flash(err or "Invalid address.", "error")
         return redirect(url_for("index"))
+
+    # Detect whether this is a real change before writing — only restart
+    # ckpool if the address actually changed (avoid unnecessary miner
+    # reconnects if user just clicks Save on the same value).
+    try:
+        prev = read_payout()
+    except Exception:  # noqa: BLE001
+        prev = ""
     write_payout(legacy)
-    if legacy != raw:
-        flash(f"Saved. Converted CashAddr → legacy: {legacy}.", "ok")
+
+    if legacy != prev:
+        # Re-render ckpool.conf with the new btcaddress and restart.
+        request_service_restart("ckpool")
+        if legacy != raw:
+            flash(
+                f"Saved. Converted CashAddr → legacy: {legacy}. "
+                "ckpool will restart within ~10s to pick up the new address.",
+                "ok",
+            )
+        else:
+            flash(
+                "Payout address saved. ckpool will restart within ~10s "
+                "to pick up the new address.",
+                "ok",
+            )
     else:
-        flash("Payout address saved.", "ok")
+        flash("Payout address unchanged.", "ok")
     return redirect(url_for("index"))
 
 
@@ -2723,6 +2745,14 @@ def settings_save():
         new_auth.get("enabled") != s["auth"].get("enabled") or
         new_auth.get("password_hash") != s["auth"].get("password_hash")
     )
+
+    # When diff settings change, drop the marker so the host-side
+    # restart watcher re-renders ckpool.conf and bounces the container.
+    # Previously this was implicit because the old in-container entrypoint
+    # polled for config-hash changes; the new pre-built ckpool image has
+    # no such entrypoint, so the trigger has to be explicit.
+    if diff_changed:
+        request_service_restart("ckpool")
 
     msgs = []
     if diff_changed:
