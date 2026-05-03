@@ -280,22 +280,31 @@
     }
 
     /* ── duck pond stage indicator ─────────────────────────────── */
-    /* Compact variant for the desktop table (under the worker name) */
-    .pond-mini {
-      display: inline-flex; align-items: center; gap: 0.4rem;
+    /* Inline emoji + tier label under the worker name in the desktop
+       miners table. Replaces a full SVG pond. */
+    .worker-tier {
+      display: block;
       font-size: 0.72rem; color: var(--muted);
       margin-top: 0.15rem;
+      font-weight: 500;
+      letter-spacing: 0.01em;
     }
-    .pond-mini svg { width: 28px; height: 14px; flex-shrink: 0; }
-    .pond-mini .pond-label { font-weight: 500; }
-    /* Full variant for the mobile card (between name and stats) */
+    /* Mobile worker-card variant — uses the same .duck-track + .duck-dot
+       + .duck-bread classes as the Duck-O-Meter section, plus tier
+       label / flavor text. */
     .pond-full {
-      display: flex; align-items: center; gap: 0.6rem;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 0.4rem 0.6rem;
       background: linear-gradient(180deg, transparent 0%, rgba(91,138,166,0.06) 100%);
-      border-radius: 6px; padding: 0.4rem 0.5rem;
+      border-radius: 6px; padding: 0.5rem 0.6rem;
       margin: 0.4rem 0;
     }
-    .pond-full svg { width: 80px; height: 28px; flex-shrink: 0; }
+    .pond-full .duck-track {
+      grid-column: 1 / span 2;
+      width: auto;
+    }
     .pond-full .pond-label {
       font-size: 0.78rem; color: var(--fg); font-weight: 500;
     }
@@ -304,8 +313,10 @@
       display: block; margin-top: 0.1rem;
     }
     .pond-full .pond-pct {
-      margin-left: auto; font-family: ui-monospace, monospace;
+      grid-column: 2;
+      font-family: ui-monospace, monospace;
       font-size: 0.7rem; color: var(--muted);
+      align-self: start;
     }
 
     /* ── Duck-O-Meter (slim list above miners table) ────────────── */
@@ -334,13 +345,35 @@
       font-weight: 500; letter-spacing: 0.01em;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .duck-card .duck-pond {
-      width: 100%; height: 32px;
-      border-radius: 6px; overflow: hidden;
-      background: linear-gradient(180deg, rgba(91,138,166,0.08), rgba(91,138,166,0.18));
-      border: 1px solid rgba(91,138,166,0.18);
+    .duck-card .duck-track {
+      position: relative;
+      width: 100%;
+      height: 4px;
+      background: rgba(91, 138, 166, 0.22);
+      border-radius: 999px;
+      /* Reserve room on the right for the bread emoji so the duck dot
+         doesn't visually overlap it at progress01 ≈ 1.0. */
+      margin-right: 22px;
     }
-    .duck-card .duck-pond svg { width: 100%; height: 100%; display: block; }
+    .duck-card .duck-dot {
+      position: absolute;
+      top: 50%;
+      width: 12px; height: 12px;
+      background: #f9a825;
+      border: 1.5px solid #c77800;
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      transition: left 0.6s ease-out;
+      box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
+    }
+    .duck-card .duck-bread {
+      position: absolute;
+      right: -22px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 16px;
+      line-height: 1;
+    }
     .duck-card .duck-pct {
       font-size: 0.82rem; color: var(--accent); font-weight: 500;
       font-family: ui-monospace, monospace;
@@ -352,7 +385,7 @@
     .duck-card .duck-stats { display: none; }
 
     /* On narrow screens, collapse to a 2-row layout per worker so
-       names don't truncate too aggressively but bars still align. */
+       names don't truncate too aggressively but tracks still align. */
     @media (max-width: 720px) {
       .duck-card {
         grid-template-columns: 1fr 80px;
@@ -365,7 +398,7 @@
         grid-column: 2; grid-row: 1;
         text-align: right; font-size: 0.74rem;
       }
-      .duck-card .duck-pond { grid-column: 1; grid-row: 2; height: 28px; }
+      .duck-card .duck-track { grid-column: 1; grid-row: 2; }
       .duck-card .duck-pct { grid-column: 2; grid-row: 2; }
     }
 
@@ -515,8 +548,9 @@
                 <div class="duck-card" data-worker="{{ w.id }}">
                   <span class="duck-name">{{ w.name }}</span>
                   <span class="duck-tier">{{ w.stage_emoji }} {{ w.stage_label }}</span>
-                  <div class="duck-pond">
-                    {{ pond_svg(w.stage_level or 0, 240, 32, w.progress01 or 0) | safe }}
+                  <div class="duck-track">
+                    <div class="duck-dot" style="left: {{ ((w.progress01 or 0) * 100)|round(2) }}%;"></div>
+                    <span class="duck-bread">🍞</span>
                   </div>
                   <span class="duck-pct">{{ "%.4f"|format(w.progress_pct or 0) }}%</span>
                 </div>
@@ -550,10 +584,7 @@
                         <td class="worker-name">
                           {{ w.name }}
                           {% if w.stage_level and w.stage_level > 0 %}
-                            <div class="pond-mini">
-                              {{ pond_svg(w.stage_level) | safe }}
-                              <span class="pond-label">{{ w.stage_emoji }} {{ w.stage_label }}</span>
-                            </div>
+                            <span class="worker-tier" title="{{ w.stage_label }}">{{ w.stage_emoji }} {{ w.stage_label }}</span>
                           {% endif %}
                         </td>
                         <td>
@@ -591,7 +622,10 @@
                       </div>
                       {% if w.stage_level and w.stage_level > 0 %}
                         <div class="pond-full">
-                          {{ pond_svg(w.stage_level) | safe }}
+                          <div class="duck-track">
+                            <div class="duck-dot" style="left: {{ ((w.progress01 or 0) * 100)|round(2) }}%;"></div>
+                            <span class="duck-bread">🍞</span>
+                          </div>
                           <div>
                             <span class="pond-label">{{ w.stage_emoji }} {{ w.stage_label }}</span>
                             <span class="pond-flavor">{{ w.stage_flavor }}</span>
@@ -852,107 +886,17 @@
       <p class="help">Latest: ${link}${worker}</p>`;
   }
 
-  // ───── duck pond stage SVG ─────
-  // Renders a small pond with a duck riding waves whose amplitude
-  // scales with the worker's current stage level (0..6). At Royal
-  // (level 6), the duck wears a crown.
-  function pondSVG(level, opts) {
-    opts = opts || {};
-    const w = opts.width || 80;
-    const h = opts.height || 28;
-    const progress01 = (typeof opts.progress01 === 'number')
-      ? Math.max(0, Math.min(1, opts.progress01))
-      : null;
-
-    const cy = h / 2 + 2;
-    const amp = [0, 1.5, 3, 5, 7, 9, 6][level] || 0;
-
-    // Sinusoidal water surface path
-    const steps = Math.max(8, Math.floor(w / 4));
-    let d = `M0 ${cy.toFixed(1)}`;
-    for (let i = 1; i <= steps; i++) {
-      const x = (w * i) / steps;
-      const y = cy - Math.sin((i / steps) * Math.PI * 4) * amp;
-      d += ` L${x.toFixed(1)} ${y.toFixed(1)}`;
-    }
-    d += ` L${w} ${h} L0 ${h} Z`;
-
-    const duckSize = h * 0.55;
-    const breadSize = duckSize * 0.95;
-    const breadX = w - breadSize * 0.55 - 4;
-    const breadY = cy - breadSize * 0.4;
-
-    // Duck position. progress01 (when given) maps the playable pond
-    // to 0..1; otherwise tier-based defaults.
-    const leftBound = duckSize * 0.6;
-    const rightBound = breadX - breadSize * 0.55 - duckSize * 0.4;
-    const tierPos = [-0.2, 0.05, 0.18, 0.34, 0.55, 0.75, 0.92];
-    const p = (progress01 !== null) ? progress01 : (tierPos[level] || 0);
-    const duckX = leftBound + (rightBound - leftBound) * p;
-    const duckY = cy - amp * 0.5 - duckSize * 0.35;
-
-    const showCrown = level >= 6;
-    const showWake = level >= 3 && p > 0.15;
-
-    const wake = showWake ? (() => {
-      const wakeY = duckY + duckSize * 0.6;
-      const wakeStart = duckX - duckSize * 0.55;
-      return `<path d="M${wakeStart - duckSize * 0.7} ${wakeY}
-                       q${duckSize * 0.18} -${duckSize * 0.12}
-                         ${duckSize * 0.36} 0
-                       t${duckSize * 0.36} 0"
-                    fill="none" stroke="#aac7d6" stroke-width="0.6"
-                    stroke-linecap="round" opacity="0.6"/>`;
-    })() : '';
-
-    const crown = showCrown ? `
-      <path d="M${duckX + duckSize * 0.18} ${duckY - duckSize * 0.18}
-               L${duckX + duckSize * 0.27} ${duckY - duckSize * 0.36}
-               L${duckX + duckSize * 0.36} ${duckY - duckSize * 0.22}
-               L${duckX + duckSize * 0.45} ${duckY - duckSize * 0.36}
-               L${duckX + duckSize * 0.54} ${duckY - duckSize * 0.18} Z"
-            fill="#f9a825" stroke="#c77800" stroke-width="0.5"/>` : '';
-
-    // Bread loaf — always present. Body + crust highlight + score marks.
-    const bread = `
-      <ellipse cx="${breadX}" cy="${breadY}"
-               rx="${breadSize * 0.55}" ry="${breadSize * 0.38}"
-               fill="#d18b4e" stroke="#8a4f1f" stroke-width="0.5"/>
-      <ellipse cx="${breadX}" cy="${breadY - breadSize * 0.12}"
-               rx="${breadSize * 0.4}" ry="${breadSize * 0.15}"
-               fill="#e3a872" opacity="0.7"/>
-      <line x1="${breadX - breadSize * 0.22}" y1="${breadY - breadSize * 0.18}"
-            x2="${breadX - breadSize * 0.08}" y2="${breadY - breadSize * 0.05}"
-            stroke="#8a4f1f" stroke-width="0.6" stroke-linecap="round"/>
-      <line x1="${breadX + breadSize * 0.04}" y1="${breadY - breadSize * 0.18}"
-            x2="${breadX + breadSize * 0.18}" y2="${breadY - breadSize * 0.05}"
-            stroke="#8a4f1f" stroke-width="0.6" stroke-linecap="round"/>`;
-
-    return `
-      <svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <defs>
-          <linearGradient id="pondg-${level}" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0" stop-color="#5b8aa6" stop-opacity="0.55"/>
-            <stop offset="1" stop-color="#2c4458" stop-opacity="0.85"/>
-          </linearGradient>
-        </defs>
-        <path d="${d}" fill="url(#pondg-${level})"/>
-        ${wake}
-        <ellipse cx="${duckX}" cy="${duckY + duckSize * 0.35}"
-                 rx="${duckSize * 0.55}" ry="${duckSize * 0.32}"
-                 fill="#f9a825"/>
-        <circle cx="${duckX + duckSize * 0.35}" cy="${duckY + duckSize * 0.05}"
-                r="${duckSize * 0.25}" fill="#f9a825"/>
-        <path d="M${duckX + duckSize * 0.55} ${duckY + duckSize * 0.05}
-                 l${duckSize * 0.18} -${duckSize * 0.04}
-                 l-${duckSize * 0.04} ${duckSize * 0.12} z"
-              fill="#c77800"/>
-        <circle cx="${duckX + duckSize * 0.42}" cy="${duckY}"
-                r="${duckSize * 0.04}" fill="#0c0e13"/>
-        ${crown}
-        ${bread}
-      </svg>
-    `;
+  // ───── duck track ─────
+  // Renders a thin progress track with a yellow duck dot floating along
+  // it toward a bread emoji at the right end. Replaces the heavier SVG
+  // pond renderer that lived here previously.
+  function duckTrack(progress01) {
+    const p = Math.max(0, Math.min(1, Number(progress01) || 0));
+    const pct = (p * 100).toFixed(2);
+    return `<div class="duck-track">
+      <div class="duck-dot" style="left: ${pct}%;"></div>
+      <span class="duck-bread">🍞</span>
+    </div>`;
   }
 
   function workerActions(w) {
@@ -973,12 +917,11 @@
       const pct = (w.progress_pct && w.progress_pct > 0)
         ? Number(w.progress_pct).toFixed(4) + '%'
         : '—';
-      const level = w.stage_level || 0;
       const progress01 = (typeof w.progress01 === 'number') ? w.progress01 : 0;
       return `<div class="duck-card" data-worker="${escapeHtml(w.id)}">
         <span class="duck-name">${escapeHtml(w.name)}</span>
         <span class="duck-tier">${emoji} ${escapeHtml(tier)}</span>
-        <div class="duck-pond">${pondSVG(level, {width: 240, height: 32, progress01: progress01})}</div>
+        ${duckTrack(progress01)}
         <span class="duck-pct">${pct}</span>
       </div>`;
     }).join('');
@@ -995,7 +938,7 @@
                  :                          '<span class="pill dim">Offline</span>';
       const actionCell = PUBLIC_VIEW ? '' : `<td><div class="row-actions">${workerActions(w)}</div></td>`;
       const stage = (w.stage_level || 0) > 0
-        ? `<div class="pond-mini">${pondSVG(w.stage_level)}<span class="pond-label">${w.stage_emoji || ''} ${escapeHtml(w.stage_label || '')}</span></div>`
+        ? `<span class="worker-tier" title="${escapeHtml(w.stage_label || '')}">${w.stage_emoji || ''} ${escapeHtml(w.stage_label || '')}</span>`
         : '';
       return `<tr class="${w.status}">
         <td class="worker-name">${escapeHtml(w.name)}${stage}</td>
@@ -1024,9 +967,10 @@
       const pctText = (w.progress_pct && w.progress_pct > 0)
         ? `<span class="pond-pct">${Number(w.progress_pct).toFixed(4)}%</span>`
         : '';
+      const progress01 = (typeof w.progress01 === 'number') ? w.progress01 : 0;
       const pondBlock = (w.stage_level || 0) > 0
         ? `<div class="pond-full">
-             ${pondSVG(w.stage_level, {width: 80, height: 28})}
+             ${duckTrack(progress01)}
              <div>
                <span class="pond-label">${w.stage_emoji || ''} ${escapeHtml(w.stage_label || '')}</span>
                <span class="pond-flavor">${escapeHtml(w.stage_flavor || '')}</span>
