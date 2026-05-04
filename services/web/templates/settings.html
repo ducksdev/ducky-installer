@@ -199,44 +199,138 @@
     }
     .tier-row {
       display: flex; gap: 0.5rem; align-items: stretch;
-      padding: 0.5rem 0.6rem;
+      padding: 0.6rem 0.7rem;
       background: rgba(255, 255, 255, 0.02);
       border: 1px solid var(--border);
       border-radius: 8px;
     }
     .tier-fields {
       display: grid;
-      grid-template-columns: 110px 70px minmax(120px, 1fr) minmax(160px, 1.5fr) 90px;
-      gap: 0.4rem;
+      /* threshold | emoji | label | flavor | color */
+      grid-template-columns:
+        minmax(90px,  0.8fr)
+        minmax(60px,  0.5fr)
+        minmax(120px, 1.2fr)
+        minmax(160px, 2fr)
+        minmax(80px,  0.7fr);
+      gap: 0.5rem;
       flex: 1;
+      min-width: 0; /* let the grid shrink inside the flex parent */
     }
     .tier-field {
-      display: flex; flex-direction: column; gap: 0.15rem;
+      display: flex; flex-direction: column; gap: 0.2rem;
+      min-width: 0; /* prevent input overflow */
     }
     .tier-label-text {
-      font-size: 0.66rem;
-      letter-spacing: 0.05em;
+      font-size: 0.62rem;
+      letter-spacing: 0.06em;
       text-transform: uppercase;
       color: var(--muted);
+      font-weight: 500;
     }
     .tier-field input {
       width: 100%; box-sizing: border-box;
-      padding: 0.35rem 0.45rem;
+      padding: 0.45rem 0.6rem;
       font-size: 0.85rem;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      background: var(--panel-soft); color: var(--fg);
+      border: 1px solid var(--border); border-radius: 6px;
+      transition: border-color 0.12s, box-shadow 0.12s;
+    }
+    .tier-field input:focus {
+      outline: none; border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(249,168,37,0.18);
+    }
+    .tier-field input::placeholder {
+      color: var(--muted); opacity: 0.55;
+    }
+    /* The label and flavor fields are prose, not codes — use the
+       regular sans font for readability. */
+    .tier-field.tier-label-input input,
+    .tier-field.tier-flavor input {
+      font-family: inherit;
+    }
+    /* Color swatch + hex text combo. The native color picker handles
+       the popup UI; the text input is the canonical value submitted to
+       the server and stays in sync via JS below. */
+    .tier-color-combo {
+      display: flex; align-items: stretch; gap: 0.4rem;
+    }
+    .tier-color-combo input[type="text"] {
+      flex: 1; min-width: 0;
+    }
+    .tier-color-swatch {
+      width: 32px; height: 32px;
+      padding: 0; border: 1px solid var(--border);
+      border-radius: 6px;
+      background: transparent;
+      cursor: pointer;
+      flex-shrink: 0;
+      /* Strip default chrome so it reads as a tappable color tile */
+      -webkit-appearance: none; appearance: none;
+      overflow: hidden;
+    }
+    .tier-color-swatch::-webkit-color-swatch-wrapper {
+      padding: 0;
+    }
+    .tier-color-swatch::-webkit-color-swatch {
+      border: none;
+      border-radius: 5px;
+    }
+    .tier-color-swatch::-moz-color-swatch {
+      border: none;
+      border-radius: 5px;
+    }
+    .tier-color-swatch:hover {
+      border-color: var(--accent);
     }
     .tier-remove {
       width: 32px; padding: 0; flex-shrink: 0;
       align-self: center;
-      font-size: 1.1rem; line-height: 1;
+      font-size: 1.2rem; line-height: 1;
       color: var(--muted);
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      cursor: pointer;
+      height: 32px;
     }
-    .tier-remove:hover { color: var(--error, #c66); }
-    @media (max-width: 720px) {
+    .tier-remove:hover {
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+    /* Tablet: 3 columns instead of 5 — flavor + color drop to row 2 */
+    @media (max-width: 980px) {
+      .tier-fields {
+        grid-template-columns: minmax(90px, 1fr) 60px 1fr;
+        grid-template-areas:
+          "min   emoji label"
+          "flavor flavor color";
+        gap: 0.4rem 0.5rem;
+      }
+      .tier-field.tier-min          { grid-area: min; }
+      .tier-field.tier-emoji        { grid-area: emoji; }
+      .tier-field.tier-label-input  { grid-area: label; }
+      .tier-field.tier-flavor       { grid-area: flavor; }
+      .tier-field.tier-color        { grid-area: color; }
+    }
+    /* Phone: stack everything */
+    @media (max-width: 540px) {
+      .tier-row { flex-direction: column; }
       .tier-fields {
         grid-template-columns: 1fr 1fr;
+        grid-template-areas:
+          "min   emoji"
+          "label label"
+          "flavor flavor"
+          "color color";
       }
-      .tier-field.tier-flavor,
-      .tier-field.tier-label-input { grid-column: 1 / -1; }
+      .tier-remove {
+        align-self: flex-end;
+        width: auto; padding: 0.3rem 0.7rem;
+        font-size: 0.8rem;
+      }
+      .tier-remove::before { content: "Remove "; font-size: 0.75rem; }
     }
   </style>
 </head>
@@ -373,7 +467,7 @@
       </div>
 
       <!-- Discord (default expanded — most edited section) -->
-      <div class="card" data-card="discord">
+      <div class="card" data-card="discord" data-default-collapsed="true">
         <header class="collapsible">
           <h2>Discord webhook
             {% if settings.discord.webhook_url %}<span class="pill ok">Configured</span>
@@ -455,8 +549,11 @@
                     <input type="text" name="tier_flavor" value="{{ t.flavor }}" maxlength="120">
                   </label>
                   <label class="tier-field tier-color">
-                    <span class="tier-label-text">Color (hex)</span>
-                    <input type="text" name="tier_color" value="{{ t.color }}" maxlength="6" placeholder="5b8aa6">
+                    <span class="tier-label-text">Color</span>
+                    <div class="tier-color-combo">
+                      <input type="color" class="tier-color-swatch" value="#{{ t.color or '5b6675' }}" aria-label="Pick color">
+                      <input type="text" name="tier_color" value="{{ t.color }}" maxlength="6" placeholder="5b8aa6">
+                    </div>
                   </label>
                 </div>
                 <button type="button" class="ghost tier-remove" title="Remove tier">×</button>
@@ -498,8 +595,11 @@
               <input type="text" name="tier_flavor" value="" maxlength="120">
             </label>
             <label class="tier-field tier-color">
-              <span class="tier-label-text">Color (hex)</span>
-              <input type="text" name="tier_color" value="" maxlength="6" placeholder="5b8aa6">
+              <span class="tier-label-text">Color</span>
+              <div class="tier-color-combo">
+                <input type="color" class="tier-color-swatch" value="#5b6675" aria-label="Pick color">
+                <input type="text" name="tier_color" value="" maxlength="6" placeholder="5b8aa6">
+              </div>
             </label>
           </div>
           <button type="button" class="ghost tier-remove" title="Remove tier">×</button>
@@ -521,7 +621,7 @@
     {% endif %}
 
     {% if settings.discord.webhook_url %}
-      <div class="card" data-card="webhook-test" style="margin-top: 1.25rem;">
+      <div class="card" data-card="webhook-test" data-default-collapsed="true" style="margin-top: 1.25rem;">
         <header class="collapsible">
           <h2>Test webhook</h2>
           <span class="chevron">▼</span>
@@ -604,6 +704,33 @@
     function bindRow(row) {
       const rm = row.querySelector('.tier-remove');
       if (rm) rm.addEventListener('click', () => row.remove());
+
+      // Color swatch <-> hex text input sync.
+      const swatch = row.querySelector('.tier-color-swatch');
+      const txt    = row.querySelector('input[name="tier_color"]');
+      if (swatch && txt) {
+        // Initial: ensure swatch matches text. If text is blank, leave
+        // swatch at its existing default.
+        const current = (txt.value || '').replace(/^#/, '').trim();
+        if (/^[0-9a-f]{6}$/i.test(current)) {
+          swatch.value = '#' + current;
+        } else if (/^[0-9a-f]{3}$/i.test(current)) {
+          swatch.value = '#' + current.split('').map(c => c + c).join('');
+        }
+        // Picker → text
+        swatch.addEventListener('input', () => {
+          txt.value = swatch.value.replace(/^#/, '');
+        });
+        // Text → picker (only when a complete hex is typed)
+        txt.addEventListener('input', () => {
+          const v = txt.value.replace(/^#/, '').trim();
+          if (/^[0-9a-f]{6}$/i.test(v)) {
+            swatch.value = '#' + v;
+          } else if (/^[0-9a-f]{3}$/i.test(v)) {
+            swatch.value = '#' + v.split('').map(c => c + c).join('');
+          }
+        });
+      }
     }
 
     function makeRow(t) {
