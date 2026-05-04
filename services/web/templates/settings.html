@@ -192,6 +192,52 @@
       display: inline-block; width: 6px; height: 6px; border-radius: 999px;
       background: var(--success); margin-left: 0.4rem;
     }
+
+    /* ── tier editor ───────────────────────────────────────────── */
+    .tier-rows {
+      display: flex; flex-direction: column; gap: 0.5rem;
+    }
+    .tier-row {
+      display: flex; gap: 0.5rem; align-items: stretch;
+      padding: 0.5rem 0.6rem;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    .tier-fields {
+      display: grid;
+      grid-template-columns: 110px 70px minmax(120px, 1fr) minmax(160px, 1.5fr) 90px;
+      gap: 0.4rem;
+      flex: 1;
+    }
+    .tier-field {
+      display: flex; flex-direction: column; gap: 0.15rem;
+    }
+    .tier-label-text {
+      font-size: 0.66rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .tier-field input {
+      width: 100%; box-sizing: border-box;
+      padding: 0.35rem 0.45rem;
+      font-size: 0.85rem;
+    }
+    .tier-remove {
+      width: 32px; padding: 0; flex-shrink: 0;
+      align-self: center;
+      font-size: 1.1rem; line-height: 1;
+      color: var(--muted);
+    }
+    .tier-remove:hover { color: var(--error, #c66); }
+    @media (max-width: 720px) {
+      .tier-fields {
+        grid-template-columns: 1fr 1fr;
+      }
+      .tier-field.tier-flavor,
+      .tier-field.tier-label-input { grid-column: 1 / -1; }
+    }
   </style>
 </head>
 <body>
@@ -373,6 +419,93 @@
         </div>
       </div>
 
+      <!-- Tier editor — user-defined duck stages -->
+      <div class="card" data-card="tiers" data-default-collapsed="true">
+        <header class="collapsible">
+          <h2>Duck tiers</h2>
+          <span class="chevron">▼</span>
+        </header>
+        <div class="card-body">
+          <p class="help" style="margin-top: 0;">
+            Each share is matched to a tier whose threshold it crosses. The
+            tier's emoji, label, and flavor message appear on the dashboard
+            and in Discord webhooks. Add rows for richer milestones, remove
+            rows you don't care about. Thresholds accept shorthand like
+            <code>1M</code>, <code>500K</code>, <code>400G</code>.
+          </p>
+
+          <div id="tier-rows" class="tier-rows">
+            {% for t in settings.tiers %}
+              <div class="tier-row">
+                <div class="tier-fields">
+                  <label class="tier-field tier-min">
+                    <span class="tier-label-text">Threshold ≥</span>
+                    <input type="text" name="tier_min" value="{{ tier_min_h[loop.index0] }}" placeholder="0">
+                  </label>
+                  <label class="tier-field tier-emoji">
+                    <span class="tier-label-text">Emoji</span>
+                    <input type="text" name="tier_emoji" value="{{ t.emoji }}" maxlength="8">
+                  </label>
+                  <label class="tier-field tier-label-input">
+                    <span class="tier-label-text">Label</span>
+                    <input type="text" name="tier_label" value="{{ t.label }}" maxlength="40" required>
+                  </label>
+                  <label class="tier-field tier-flavor">
+                    <span class="tier-label-text">Flavor message</span>
+                    <input type="text" name="tier_flavor" value="{{ t.flavor }}" maxlength="120">
+                  </label>
+                  <label class="tier-field tier-color">
+                    <span class="tier-label-text">Color (hex)</span>
+                    <input type="text" name="tier_color" value="{{ t.color }}" maxlength="6" placeholder="5b8aa6">
+                  </label>
+                </div>
+                <button type="button" class="ghost tier-remove" title="Remove tier">×</button>
+              </div>
+            {% endfor %}
+          </div>
+
+          <div class="actions-bar" style="margin-top: 0.5rem;">
+            <button type="button" class="ghost" id="tier-add">+ Add tier</button>
+            <button type="button" class="ghost" id="tier-reset" title="Reset all tiers to the built-in defaults">Reset to defaults</button>
+          </div>
+
+          <p class="help" style="margin-top: 0.5rem; font-size: 0.78rem;">
+            Tiers are sorted by threshold automatically on save. Empty
+            labels are dropped. A zero-share fallback row is always
+            present (added for you if you delete it).
+          </p>
+        </div>
+      </div>
+
+      <!-- hidden template for new tier rows; cloned by JS -->
+      <template id="tier-row-template">
+        <div class="tier-row">
+          <div class="tier-fields">
+            <label class="tier-field tier-min">
+              <span class="tier-label-text">Threshold ≥</span>
+              <input type="text" name="tier_min" value="" placeholder="0">
+            </label>
+            <label class="tier-field tier-emoji">
+              <span class="tier-label-text">Emoji</span>
+              <input type="text" name="tier_emoji" value="🦆" maxlength="8">
+            </label>
+            <label class="tier-field tier-label-input">
+              <span class="tier-label-text">Label</span>
+              <input type="text" name="tier_label" value="" maxlength="40" required>
+            </label>
+            <label class="tier-field tier-flavor">
+              <span class="tier-label-text">Flavor message</span>
+              <input type="text" name="tier_flavor" value="" maxlength="120">
+            </label>
+            <label class="tier-field tier-color">
+              <span class="tier-label-text">Color (hex)</span>
+              <input type="text" name="tier_color" value="" maxlength="6" placeholder="5b8aa6">
+            </label>
+          </div>
+          <button type="button" class="ghost tier-remove" title="Remove tier">×</button>
+        </div>
+      </template>
+
       <div class="actions-bar">
         <button type="submit">Save settings</button>
         <a href="{{ url_for('index') }}">Cancel</a>
@@ -453,6 +586,49 @@
     }
     cb.addEventListener('change', update);
     update();
+  })();
+
+  // ── Tier editor — add/remove/reset ───────────────────────────
+  (function() {
+    const list = document.getElementById('tier-rows');
+    const tpl  = document.getElementById('tier-row-template');
+    const addBtn   = document.getElementById('tier-add');
+    const resetBtn = document.getElementById('tier-reset');
+    if (!list || !tpl || !addBtn) return;
+
+    // Default tier list lives server-side too — embedded here so the
+    // Reset button works without a round-trip. Keep this in sync with
+    // DEFAULT_SETTINGS["tiers"] in app.py.
+    const DEFAULT_TIERS = {{ default_tiers_json | safe }};
+
+    function bindRow(row) {
+      const rm = row.querySelector('.tier-remove');
+      if (rm) rm.addEventListener('click', () => row.remove());
+    }
+
+    function makeRow(t) {
+      const node = tpl.content.firstElementChild.cloneNode(true);
+      node.querySelector('input[name="tier_min"]').value    = (t && t.min_h) || '';
+      node.querySelector('input[name="tier_emoji"]').value  = (t && t.emoji) || '🦆';
+      node.querySelector('input[name="tier_label"]').value  = (t && t.label) || '';
+      node.querySelector('input[name="tier_flavor"]').value = (t && t.flavor) || '';
+      node.querySelector('input[name="tier_color"]').value  = (t && t.color) || '';
+      bindRow(node);
+      return node;
+    }
+
+    // Bind existing server-rendered rows
+    list.querySelectorAll('.tier-row').forEach(bindRow);
+
+    addBtn.addEventListener('click', () => list.appendChild(makeRow()));
+
+    if (resetBtn) {
+      resetBtn.addEventListener('click', () => {
+        if (!confirm('Reset all tiers to the built-in defaults? Your custom labels and thresholds will be lost.')) return;
+        list.innerHTML = '';
+        DEFAULT_TIERS.forEach(t => list.appendChild(makeRow(t)));
+      });
+    }
   })();
   </script>
 </body>

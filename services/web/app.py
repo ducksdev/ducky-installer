@@ -133,6 +133,23 @@ DEFAULT_SETTINGS = {
         # there and convert to raw int before storing.
         "min_share": 0,
     },
+    # Duck-stage tiers. Each entry says "if a share is ≥ `min`, this is
+    # the label/emoji/flavor to show on the dashboard and in webhook
+    # embeds." Tiers are sorted by `min` ascending; the matching tier
+    # is the highest one whose `min` is <= sdiff. Index 0 is always the
+    # zero-share fallback. Users can edit, add, or remove tiers via
+    # the Settings page; defaults restore on bad/missing data.
+    # Colors are hex strings without #; rendered into Discord embed
+    # decimals via int(color, 16). Optional — defaults applied if blank.
+    "tiers": [
+        {"min": 0,             "emoji": "🦆",  "label": "Empty pond",     "flavor": "Duck waiting patiently…",      "color": "5b6675"},
+        {"min": 1,             "emoji": "💧",  "label": "Light ripples",   "flavor": "Tiny crumbs landing.",         "color": "5b8aa6"},
+        {"min": 100_000,       "emoji": "🌊",  "label": "Decent splash",   "flavor": "The duck noticed!",            "color": "4a90a4"},
+        {"min": 1_000_000,     "emoji": "🦆",  "label": "Big splash",      "flavor": "Other ducks paddling over.",   "color": "c77800"},
+        {"min": 10_000_000,    "emoji": "🌪",  "label": "Huge wave",       "flavor": "Whole flock arriving!",        "color": "f9a825"},
+        {"min": 100_000_000,   "emoji": "🍞",  "label": "Loaf alert",      "flavor": "Duck spotted a loaf!",         "color": "ff6b00"},
+        {"min": 1_000_000_000, "emoji": "👑",  "label": "Royal duck",      "flavor": "Approaching the bakery!",      "color": "f9a825"},
+    ],
     # Optional dashboard password protection. When disabled (default),
     # the dashboard and admin actions are open to anyone who can reach
     # the web port — fine for LAN-only setups, dangerous if exposed.
@@ -363,9 +380,61 @@ def _atomic_write_json(path: str, data: dict) -> None:
     os.replace(tmp, path)
 
 
+def _normalise_tiers(raw) -> list:
+    """Take user-supplied tiers, drop invalid rows, sort by min, and
+    guarantee a level-0 fallback. Returns a fresh list every call so
+    callers can mutate freely."""
+    if not isinstance(raw, list) or not raw:
+        return [dict(t) for t in DEFAULT_SETTINGS["tiers"]]
+
+    cleaned = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            mn = int(entry.get("min", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if mn < 0:
+            continue
+        label = str(entry.get("label", "") or "").strip()
+        if not label:
+            continue  # label is required — empty rows aren't useful
+        emoji = str(entry.get("emoji", "") or "").strip() or "🦆"
+        flavor = str(entry.get("flavor", "") or "").strip()
+        color = str(entry.get("color", "") or "").strip().lstrip("#")
+        # Validate color is hex (or empty for default)
+        if color:
+            try:
+                int(color, 16)
+            except ValueError:
+                color = ""
+        cleaned.append({
+            "min": mn,
+            "emoji": emoji,
+            "label": label,
+            "flavor": flavor,
+            "color": color,
+        })
+
+    if not cleaned:
+        return [dict(t) for t in DEFAULT_SETTINGS["tiers"]]
+
+    # Sort ascending by min so duck_stage can iterate in order.
+    cleaned.sort(key=lambda t: t["min"])
+
+    # Guarantee a level-0 fallback for sdiff <= 0. If the user dropped
+    # the "Empty pond" row, prepend a minimal one so duck_stage always
+    # has something to return.
+    if cleaned[0]["min"] > 0:
+        cleaned.insert(0, dict(DEFAULT_SETTINGS["tiers"][0]))
+
+    return cleaned
+
+
 def _merge_defaults(loaded: dict) -> dict:
     out = dict(DEFAULT_SETTINGS)
-    out.update({k: v for k, v in loaded.items() if k not in ("discord", "auth")})
+    out.update({k: v for k, v in loaded.items() if k not in ("discord", "auth", "tiers")})
     discord = dict(DEFAULT_SETTINGS["discord"])
     discord.update(loaded.get("discord") or {})
     out["discord"] = discord
@@ -377,6 +446,7 @@ def _merge_defaults(loaded: dict) -> dict:
     if not auth.get("password_hash"):
         auth["enabled"] = False
     out["auth"] = auth
+    out["tiers"] = _normalise_tiers(loaded.get("tiers"))
     return out
 
 
@@ -1498,67 +1568,55 @@ def progress_bar(current: float, target: float, width: int = 14) -> str:
 #   flavor  : one-liner of duck microcopy
 #   color   : RGB int for Discord embed border (warm pond colours)
 #   emoji   : single character for inline use
+_DEFAULT_TIER_COLOR = 0x5b6675  # neutral grey, used when a tier has no color set
+
+
 def duck_stage(sdiff: float, net_diff: float | None = None) -> dict:
-    """Return the duck stage for this share. If net_diff is provided
-    and the share crosses 1% of network difficulty, we promote it to
-    'Royal duck' regardless of raw sdiff."""
+    """Find the matching tier for this share difficulty by walking the
+    user-configured tier list from settings.json (or defaults if none).
+    The tier list is sorted ascending by `min`; we pick the highest
+    entry whose min is <= sdiff.
+
+    The `net_diff` argument is preserved for backwards compatibility
+    with callers that used to pass it for the "Royal duck on >= 1% of
+    net diff" override. With user-defined tiers, that promotion is no
+    longer automatic — set a high-min tier explicitly to get the same
+    effect (e.g. min=10G with label="👑 Royal duck").
+    """
+    s = load_settings()
+    tiers = s.get("tiers") or _normalise_tiers(None)
+
     if sdiff <= 0:
-        return {
-            "level": 0,
-            "label": "Empty pond",
-            "flavor": "Duck waiting patiently…",
-            "color": 0x5b6675,
-            "emoji": "🦆",
-        }
+        # First entry is always the level-0 fallback (zero share).
+        t = tiers[0]
+    else:
+        # Walk from the top down — first entry whose min is <= sdiff wins.
+        t = tiers[0]
+        for entry in tiers:
+            if sdiff >= entry["min"]:
+                t = entry
+            else:
+                break
 
-    # Royal-duck override when share is a large fraction of network diff.
-    if net_diff and net_diff > 0 and (sdiff / net_diff) >= 0.01:
-        return {
-            "level": 6,
-            "label": "Royal duck moment",
-            "flavor": "Approaching the bakery!",
-            "color": 0xf9a825,
-            "emoji": "👑",
-        }
+    color_hex = t.get("color") or ""
+    try:
+        color_int = int(color_hex, 16) if color_hex else _DEFAULT_TIER_COLOR
+    except ValueError:
+        color_int = _DEFAULT_TIER_COLOR
 
-    if sdiff < 100_000:
-        return {
-            "level": 1,
-            "label": "Light ripples",
-            "flavor": "Tiny crumbs landing.",
-            "color": 0x5b8aa6,
-            "emoji": "💧",
-        }
-    if sdiff < 1_000_000:
-        return {
-            "level": 2,
-            "label": "Decent splash",
-            "flavor": "The duck noticed!",
-            "color": 0x4a90a4,
-            "emoji": "🌊",
-        }
-    if sdiff < 10_000_000:
-        return {
-            "level": 3,
-            "label": "Big splash",
-            "flavor": "Other ducks paddling over.",
-            "color": 0xc77800,
-            "emoji": "🦆",
-        }
-    if sdiff < 100_000_000:
-        return {
-            "level": 4,
-            "label": "Huge wave",
-            "flavor": "Whole flock arriving!",
-            "color": 0xf9a825,
-            "emoji": "🌪",
-        }
+    # `level` is the tier's index in the list — used by dashboard JS to
+    # compute progress01 (how far along the duck has paddled).
+    try:
+        level = tiers.index(t)
+    except ValueError:
+        level = 0
+
     return {
-        "level": 5,
-        "label": "Loaf alert",
-        "flavor": "Duck spotted a loaf!",
-        "color": 0xff6b00,
-        "emoji": "🍞",
+        "level": level,
+        "label": t.get("label", "Empty pond"),
+        "flavor": t.get("flavor", ""),
+        "color": color_int,
+        "emoji": t.get("emoji", "🦆"),
     }
 
 
@@ -2605,6 +2663,23 @@ def reset_stats():
 def settings_page():
     s = load_settings()
     min_share_raw = int(s["discord"].get("min_share") or 0)
+    # Humanise per-tier min so the form shows shorthand values
+    # ('400G' not '400000000000'). Index-aligned with settings.tiers.
+    tier_min_h = [
+        humanise_diff(int(t.get("min", 0) or 0)) if int(t.get("min", 0) or 0) > 0 else "0"
+        for t in s["tiers"]
+    ]
+    # Serialize defaults for the JS "Reset to defaults" button. Add a
+    # min_h field so the form input gets the shorthand version.
+    default_tiers = []
+    for t in DEFAULT_SETTINGS["tiers"]:
+        default_tiers.append({
+            "min_h":  humanise_diff(int(t["min"])) if t["min"] > 0 else "0",
+            "emoji":  t["emoji"],
+            "label":  t["label"],
+            "flavor": t["flavor"],
+            "color":  t["color"],
+        })
     return render_template(
         "settings.html",
         settings=s,
@@ -2612,6 +2687,8 @@ def settings_page():
         maxdiff_h=humanise_diff(s["maxdiff"]) if s["maxdiff"] else "0",
         startdiff_h=humanise_diff(s["startdiff"]) if s["startdiff"] else "1",
         min_share_h=humanise_diff(min_share_raw) if min_share_raw > 0 else "",
+        tier_min_h=tier_min_h,
+        default_tiers_json=json.dumps(default_tiers),
     )
 
 
@@ -2665,6 +2742,46 @@ def settings_save():
         elif min_share is None or min_share < 0:
             errors.append("Discord min share must be ≥ 0 (use 0 to disable threshold).")
             min_share = 0
+
+    # Tier rows come in as parallel arrays from the dynamic editor:
+    # tier_min[], tier_emoji[], tier_label[], tier_flavor[], tier_color[].
+    # We zip them by index, validate each row, and drop invalid ones.
+    # _normalise_tiers handles sorting + level-0 fallback and falls
+    # back to defaults if everything is invalid (never leaves the
+    # dashboard with zero tiers).
+    raw_mins    = request.form.getlist("tier_min")
+    raw_emojis  = request.form.getlist("tier_emoji")
+    raw_labels  = request.form.getlist("tier_label")
+    raw_flavors = request.form.getlist("tier_flavor")
+    raw_colors  = request.form.getlist("tier_color")
+    tier_rows = []
+    for i, raw_min in enumerate(raw_mins):
+        raw_min = (raw_min or "").strip()
+        label = (raw_labels[i] if i < len(raw_labels) else "").strip()
+        if not label:
+            continue  # blank rows are silently dropped (lets users delete via clear)
+        # Parse min via parse_diff so '400G', '1.5M', '500000' all work.
+        if raw_min == "":
+            mn_val = 0
+        else:
+            mn_val, err = parse_diff(raw_min)
+            if err:
+                errors.append(f"Tier '{label}' threshold: {err}")
+                continue
+            if mn_val is None or mn_val < 0:
+                errors.append(f"Tier '{label}' threshold must be ≥ 0.")
+                continue
+        tier_rows.append({
+            "min":    int(mn_val),
+            "emoji":  (raw_emojis[i] if i < len(raw_emojis) else "").strip(),
+            "label":  label,
+            "flavor": (raw_flavors[i] if i < len(raw_flavors) else "").strip(),
+            "color":  (raw_colors[i]  if i < len(raw_colors)  else "").strip().lstrip("#"),
+        })
+    # If the user submitted no valid rows at all, fall back to current
+    # tiers (so an accidental "delete all" doesn't wipe the config).
+    if not tier_rows:
+        tier_rows = list(s.get("tiers") or [])
 
     # ── auth handling ──
     # Determine target state and apply transitions:
@@ -2735,6 +2852,7 @@ def settings_save():
             "avatar_url": avatar_url,
             "min_share": int(min_share or 0),
         },
+        "tiers": _normalise_tiers(tier_rows),
         "auth": new_auth,
     }
     save_settings(new)
