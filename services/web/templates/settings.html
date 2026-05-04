@@ -254,10 +254,13 @@
        the popup UI; the text input is the canonical value submitted to
        the server and stays in sync via JS below. */
     .tier-color-combo {
-      display: flex; align-items: stretch; gap: 0.4rem;
+      display: grid;
+      grid-template-columns: 32px 1fr;
+      gap: 0.4rem;
+      align-items: center;
     }
     .tier-color-combo input[type="text"] {
-      flex: 1; min-width: 0;
+      width: 100%; min-width: 0;
     }
     .tier-color-swatch {
       width: 32px; height: 32px;
@@ -265,7 +268,6 @@
       border-radius: 6px;
       background: transparent;
       cursor: pointer;
-      flex-shrink: 0;
       /* Strip default chrome so it reads as a tappable color tile */
       -webkit-appearance: none; appearance: none;
       overflow: hidden;
@@ -519,7 +521,7 @@
           <h2>Duck tiers</h2>
           <span class="chevron">▼</span>
         </header>
-        <div class="card-body">
+        <div class="body">
           <p class="help" style="margin-top: 0;">
             Each share is matched to a tier whose threshold it crosses. The
             tier's emoji, label, and flavor message appear on the dashboard
