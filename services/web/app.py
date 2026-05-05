@@ -44,6 +44,25 @@ from flask import (
 
 app = Flask(__name__)
 
+# Module-level constants for the dashboard footer.
+APP_STARTED_AT = int(time.time())
+APP_VERSION = os.environ.get("APP_VERSION", "1.0")
+GITHUB_URL = os.environ.get("GITHUB_URL", "https://github.com/ducksdev/ducky-installer")
+
+
+@app.context_processor
+def _inject_footer_globals():
+    """Make footer values available to every template without each
+    route having to pass them. Uptime is computed per-request so the
+    footer ticks up live on each page load."""
+    uptime_s = max(0, int(time.time()) - APP_STARTED_AT)
+    return {
+        "footer_uptime_s": uptime_s,
+        "footer_uptime_human": humanise_duration(uptime_s),
+        "footer_version": APP_VERSION,
+        "footer_github": GITHUB_URL,
+    }
+
 
 def _load_or_create_flask_secret() -> str:
     """Persistent Flask secret. Stored in /shared so it survives container
@@ -254,6 +273,31 @@ def humanise_age(seconds: float | None) -> str:
     if s < 86400:
         return f"{s // 3600}h ago"
     return f"{s // 86400}d ago"
+
+
+def humanise_duration(seconds: float | None) -> str:
+    """Human-readable duration WITHOUT 'ago' suffix. Used for uptime
+    displays where the value isn't a relative timestamp.
+    Examples: 30s -> '30s', 95s -> '1m 35s', 7320s -> '2h 2m',
+    400000s -> '4d 15h'. Falls through to '—' for None.
+    """
+    if seconds is None:
+        return "—"
+    s = int(seconds)
+    if s < 0:
+        s = 0
+    if s < 60:
+        return f"{s}s"
+    if s < 3600:
+        m, sec = divmod(s, 60)
+        return f"{m}m {sec}s" if sec else f"{m}m"
+    if s < 86400:
+        h, rem = divmod(s, 3600)
+        m = rem // 60
+        return f"{h}h {m}m" if m else f"{h}h"
+    d, rem = divmod(s, 86400)
+    h = rem // 3600
+    return f"{d}d {h}h" if h else f"{d}d"
 
 
 def humanise_diff(n: float | int | None) -> str:
