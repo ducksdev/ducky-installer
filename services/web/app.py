@@ -198,11 +198,16 @@ SHARE_TAIL_INTERVAL = int(os.environ.get("SHARE_TAIL_INTERVAL", "2"))
 
 LEGACY_BCH_RE = re.compile(r"^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$")
 CASHADDR_RE = re.compile(r"^(bitcoincash:)?[qp][a-z0-9]{40,}$", re.IGNORECASE)
-# File on disk in /users is just the Base58 BCH address.
-USER_FILENAME_RE = re.compile(r"^[a-km-zA-HJ-NP-Z1-9]{25,40}$")
+# File on disk in /users may be either a Base58 BCH address (legacy form)
+# OR a CashAddr-shaped string (qzy..., 42 chars), depending on what username
+# the miner originally authed with. ckpool just saves the username as the
+# filename, with optional `bitcoincash:` prefix or colons. We match a wide
+# range of shapes so neither variant is silently skipped on the dashboard.
+# The contents are still validated when we open and parse the file.
+USER_FILENAME_RE = re.compile(r"^(bitcoincash:)?[a-zA-Z0-9]{25,70}$")
 # Synthetic worker ID used in dashboard URLs and baseline keys: <address>.<workername>.
 # Keep this in sync with how ckpool emits "workername" in the user file's `worker` array.
-WORKER_ID_RE = re.compile(r"^[a-km-zA-HJ-NP-Z1-9]{25,40}\.[A-Za-z0-9_\-]+$")
+WORKER_ID_RE = re.compile(r"^(bitcoincash:)?[a-zA-Z0-9]{25,70}\.[A-Za-z0-9_\-]+$")
 # Backwards-compat alias so existing call sites still work.
 WORKER_FILENAME_RE = WORKER_ID_RE
 
