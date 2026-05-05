@@ -1103,6 +1103,7 @@ def get_pool_stats() -> dict:
             "accepted": data.get("accepted", 0),
             "rejected": data.get("rejected", 0),
             "best_share": humanise_diff(data.get("bestshare", 0)),
+            "best_share_raw": float(data.get("bestshare", 0) or 0),
             "diff": data.get("diff", 0),
         }
     except FileNotFoundError:
@@ -1129,6 +1130,13 @@ def get_workers() -> list[dict]:
     # Look up network difficulty once for the Royal-duck stage check.
     # get_network_difficulty() is cached so this is essentially free.
     net_diff = get_network_difficulty()
+
+    # Tier count for progress01 calculation. The duck position is
+    # tier-based: each tier maps to an evenly-spaced position from 0
+    # (level 0) to 1 (highest tier). tier_count - 1 is the divisor so
+    # the highest tier lands exactly at 1.0 (next to the bread emoji).
+    s = load_settings()
+    tier_count = max(2, len(s.get("tiers") or []))
 
     # Load baselines once per call so we can apply the reset_snapshot
     # filter and the hidden-workers filter without hammering disk.
@@ -1268,22 +1276,18 @@ def get_workers() -> list[dict]:
                 else 0.0
             )
 
-            # Log-scaled duck position 0..1 along the pond. Linear
-            # share/target would pin the duck at the left edge for
-            # virtually all share difficulties (a 1M share against an
-            # 800G target is 0.0001%). log(share)/log(target) gives
-            # the duck room to move: a 1M share lands ~25%, 1B lands
-            # ~67%, 100B lands ~90%, an actual block-difficulty share
-            # lands at the far right next to the bread.
-            if displayed_best > 0 and net_diff and net_diff > 1:
-                import math
-                try:
-                    progress01 = math.log(max(2.0, displayed_best)) / math.log(net_diff)
-                except (ValueError, ZeroDivisionError):
-                    progress01 = 0.0
-                progress01 = max(0.0, min(1.0, progress01))
+            # Tier-based duck position. Each tier index maps to an
+            # evenly-spaced position 0..1 along the pond. Level 0 is
+            # at the far left (no shares), the highest tier is at the
+            # far right (next to the bread). The duck only moves when
+            # a share crosses into a new tier — predictable and
+            # matches the visible tier label.
+            level = stage.get("level", 0)
+            if tier_count > 1:
+                progress01 = level / (tier_count - 1)
             else:
                 progress01 = 0.0
+            progress01 = max(0.0, min(1.0, progress01))
 
             out.append({
                 "id": workername,
@@ -2283,6 +2287,67 @@ def _start_watcher() -> None:
 
 # ──────────────────────────── routes ────────────────────────────
 
+def _update_pool_best_trackers(workers: list[dict], blocks_count: int,
+                               network_height: int | None) -> dict:
+    """Maintain the three pool-wide best-share counters used by the
+    Best Share card's three display modes:
+
+      ever            — ckpool's persistent all-time bestshare from
+                        pool.status. Read directly elsewhere; not
+                        managed here. Survives soft reset.
+      since_block_found — highest share submitted since OUR pool last
+                        won a block. Resets when get_blocks_summary's
+                        count grows. If we've never won, this is the
+                        same as "since install".
+      current_block   — highest share submitted against the current
+                        NETWORK block height. Resets when network
+                        height grows (~every 10 minutes for BCH).
+
+    All three are derived from the per-worker post_reset_best maxes
+    on this tick. We compare the current max to the stored anchor
+    and reset when a watched event has happened.
+
+    State is persisted to best_baselines.json under 'pool_bests' so
+    values survive web container restarts.
+    """
+    cur_max = 0.0
+    for w in workers:
+        try:
+            cur_max = max(cur_max, float(w.get("best_share_raw", 0) or 0))
+        except (TypeError, ValueError):
+            continue
+
+    out = {"since_block_found": cur_max, "current_block": cur_max}
+
+    with _state_lock:
+        state = _load_baselines()
+        pb = state.setdefault("pool_bests", {})
+
+        # since_block_found: reset when our blocks count goes up.
+        sbf = pb.setdefault("since_block_found", {"value": 0.0, "anchor_blocks": 0})
+        if blocks_count > int(sbf.get("anchor_blocks", 0) or 0):
+            # New block found! Start fresh.
+            sbf["value"] = cur_max
+            sbf["anchor_blocks"] = blocks_count
+        else:
+            sbf["value"] = max(float(sbf.get("value", 0.0) or 0.0), cur_max)
+        out["since_block_found"] = float(sbf["value"])
+
+        # current_block: reset when network height advances.
+        if network_height is not None and network_height > 0:
+            cb = pb.setdefault("current_block", {"value": 0.0, "anchor_height": 0})
+            if network_height > int(cb.get("anchor_height", 0) or 0):
+                cb["value"] = cur_max
+                cb["anchor_height"] = network_height
+            else:
+                cb["value"] = max(float(cb.get("value", 0.0) or 0.0), cur_max)
+            out["current_block"] = float(cb["value"])
+
+        _save_baselines(state)
+
+    return out
+
+
 def _build_stats_payload(public: bool = False) -> dict:
     """Shared stats payload for /api/stats and /api/public/stats. The
     public variant strips fields a stranger shouldn't see."""
@@ -2291,31 +2356,52 @@ def _build_stats_payload(public: bool = False) -> dict:
     net_diff = get_network_difficulty()
     pool_hashrate_hs = _hashrate_str_to_float(pool.get("hashrate_1m")) if pool.get("ok") else None
     eta = block_eta(pool_hashrate_hs, net_diff)
+    node = get_node_status()
 
     workers = get_workers()
 
-    # Override pool best_share with the max of per-worker displayed
-    # bests. This makes Reset stats actually clear the Pool stats
-    # Best share value too — without this, ckpool's own all-time
-    # bestshare keeps showing because it lives in pool.status which
-    # the soft reset deliberately doesn't touch.
-    #
-    # Ties pool best to dashboard semantics: show the highest "since
-    # reset" share across all visible workers. When no worker has
-    # post_reset_best set yet, falls back to "—".
+    # Three best-share modes shown in the Best Share card. The user
+    # cycles through them by clicking the value. See
+    # _update_pool_best_trackers for what each one means.
+    pool_bests_raw = _update_pool_best_trackers(
+        workers,
+        blocks_count=int(blocks.get("count", 0) or 0),
+        network_height=int(node.get("blocks", 0) or 0) if node.get("ok") else None,
+    )
+    # ckpool's all-time bestshare from pool.status survives soft reset.
+    # If pool.status isn't readable (early startup), fall back to the
+    # since-reset max so we don't show "—" forever.
+    ever_raw = 0.0
     if pool.get("ok"):
-        worker_bests = [
-            float(w.get("best_share_raw", 0) or 0)
-            for w in workers
-        ]
-        max_worker_best = max(worker_bests) if worker_bests else 0.0
-        if max_worker_best > 0:
-            pool["best_share"] = humanise_diff(max_worker_best)
-        else:
-            pool["best_share"] = "—"
+        try:
+            ever_raw = float(pool.get("best_share_raw", 0) or 0)
+        except (TypeError, ValueError):
+            ever_raw = 0.0
+
+    # Override pool best_share (the default mode shown) with the max
+    # of per-worker post_reset_best — same behaviour as before, so
+    # Reset still clears the displayed value. The other two modes are
+    # available via the new pool["best_shares"] dict.
+    if pool.get("ok"):
+        since_reset_raw = max(
+            (float(w.get("best_share_raw", 0) or 0) for w in workers),
+            default=0.0,
+        )
+        pool["best_share"] = humanise_diff(since_reset_raw) if since_reset_raw > 0 else "—"
+        pool["best_shares"] = {
+            "ever": humanise_diff(ever_raw) if ever_raw > 0 else "—",
+            "since_block_found": (
+                humanise_diff(pool_bests_raw["since_block_found"])
+                if pool_bests_raw["since_block_found"] > 0 else "—"
+            ),
+            "current_block": (
+                humanise_diff(pool_bests_raw["current_block"])
+                if pool_bests_raw["current_block"] > 0 else "—"
+            ),
+        }
 
     payload = {
-        "node": get_node_status(),
+        "node": node,
         "pool": pool,
         "workers": workers,
         "blocks": blocks,

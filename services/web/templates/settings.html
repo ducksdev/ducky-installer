@@ -6,6 +6,36 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><circle cx='32' cy='32' r='32' fill='%230c0e13'/><ellipse cx='38' cy='42' rx='20' ry='14' fill='%23f9a825'/><circle cx='22' cy='26' r='11' fill='%23f9a825'/><path d='M 6 26 L 14 22 L 14 30 Z' fill='%23ff6f00'/><circle cx='20' cy='24' r='1.6' fill='%230c0e13'/></svg>">
   <link rel="apple-touch-icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%230c0e13'/><ellipse cx='38' cy='42' rx='20' ry='14' fill='%23f9a825'/><circle cx='22' cy='26' r='11' fill='%23f9a825'/><path d='M 6 26 L 14 22 L 14 30 Z' fill='%23ff6f00'/><circle cx='20' cy='24' r='1.6' fill='%230c0e13'/></svg>">
+  <!-- Theme bootstrap. See index.html for the full comment. -->
+  <script>
+  (function applyTheme() {
+    try {
+      var LS = 'ducky-theme:';
+      var mode = localStorage.getItem(LS + 'mode') || 'dark';
+      if (mode === 'auto') {
+        var prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+        mode = prefersLight ? 'light' : 'dark';
+      }
+      if (mode === 'light' || mode === 'contrast') {
+        document.documentElement.setAttribute('data-theme', mode);
+      }
+      var size = localStorage.getItem(LS + 'size');
+      if (size && size !== 'normal') document.documentElement.setAttribute('data-text-size', size);
+      var font = localStorage.getItem(LS + 'font');
+      if (font && font !== 'system') document.documentElement.setAttribute('data-font', font);
+      var accent = localStorage.getItem(LS + 'accent');
+      if (accent && /^#?[0-9a-f]{6}$/i.test(accent)) {
+        var clean = accent.replace(/^#/, '');
+        document.documentElement.style.setProperty('--accent', '#' + clean);
+        var r = parseInt(clean.slice(0, 2), 16);
+        var g = parseInt(clean.slice(2, 4), 16);
+        var b = parseInt(clean.slice(4, 6), 16);
+        var dim = function(c) { return Math.max(0, Math.floor(c * 0.75)).toString(16).padStart(2, '0'); };
+        document.documentElement.style.setProperty('--accent-deep', '#' + dim(r) + dim(g) + dim(b));
+      }
+    } catch (e) { }
+  })();
+  </script>
   <style>
     :root {
       --bg: #0c0e13;
@@ -20,11 +50,48 @@
       --success: #4cd964;
       --warn: #ffaa00;
       --error: #ff6b6b;
+      --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      --base-size: 16px;
     }
+    :root[data-theme="light"] {
+      --bg: #f4f5f8;
+      --bg-alpha: rgba(244, 245, 248, 0.94);
+      --panel: #ffffff;
+      --panel-soft: #f8f9fb;
+      --border: #d8dde5;
+      --fg: #1a1d24;
+      --muted: #5a6478;
+      --accent-deep: #b06600;
+      --success: #1a8838;
+      --warn: #b07700;
+      --error: #c63030;
+    }
+    :root[data-theme="contrast"] {
+      --bg: #000000;
+      --bg-alpha: rgba(0, 0, 0, 0.95);
+      --panel: #0a0a0a;
+      --panel-soft: #050505;
+      --border: #555555;
+      --fg: #ffffff;
+      --muted: #c0c0c0;
+      --accent: #ffd700;
+      --accent-deep: #ccaa00;
+      --success: #00ff66;
+      --warn: #ffcc00;
+      --error: #ff4444;
+    }
+    :root[data-text-size="small"]  { --base-size: 14px; }
+    :root[data-text-size="normal"] { --base-size: 16px; }
+    :root[data-text-size="large"]  { --base-size: 18px; }
+    :root[data-text-size="xlarge"] { --base-size: 20px; }
+    :root[data-font="serif"]    { --font-stack: Georgia, "Times New Roman", Cambria, serif; }
+    :root[data-font="mono"]     { --font-stack: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+    :root[data-font="dyslexic"] { --font-stack: "OpenDyslexic", "Comic Sans MS", system-ui, sans-serif; }
+    html { font-size: var(--base-size); }
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      font-family: var(--font-stack);
       background: var(--bg); color: var(--fg);
       min-height: 100vh;
     }
@@ -40,19 +107,41 @@
     header.app-header .inner {
       max-width: 1280px; margin: 0 auto;
       padding: 0.85rem 1.5rem;
-      display: flex; align-items: center; gap: 0.75rem;
+      display: flex; align-items: center; gap: 0.6rem;
     }
     header.app-header h1 { font-weight: 600; letter-spacing: -0.01em; margin: 0; font-size: 1.4rem; }
+    header.app-header h1 a {
+      color: inherit; text-decoration: none;
+      display: inline-flex; align-items: center; gap: 0.5rem;
+    }
     header.app-header h1 .accent { color: var(--accent); }
     header.app-header .grow { flex: 1; }
-    header.app-header a.nav {
-      color: var(--muted); text-decoration: none;
-      font-size: 0.82rem; padding: 0.35rem 0.65rem;
+    header.app-header a.nav,
+    header.app-header button.nav {
+      color: var(--fg); opacity: 0.78;
+      text-decoration: none;
+      font-size: 0.88rem; font-weight: 500;
+      padding: 0.4rem 0.85rem;
       border: 1px solid var(--border); border-radius: 8px;
-      transition: border-color 0.15s, color 0.15s;
+      transition: opacity 0.15s, border-color 0.15s, color 0.15s, background 0.15s;
       white-space: nowrap;
+      background: transparent; cursor: pointer; font-family: inherit;
+      line-height: 1.2;
     }
-    header.app-header a.nav:hover { color: var(--accent); border-color: var(--accent); }
+    header.app-header a.nav:hover,
+    header.app-header button.nav:hover {
+      opacity: 1;
+      color: var(--accent); border-color: var(--accent);
+      background: var(--panel-soft);
+    }
+    header.app-header a.nav.current,
+    header.app-header button.nav.current {
+      opacity: 1;
+      color: var(--accent);
+      border-color: var(--accent);
+      background: var(--panel-soft);
+      cursor: default;
+    }
 
     /* ── layout ────────────────────────────────────────────────── */
     .wrap {
@@ -61,8 +150,12 @@
     }
     .lede { color: var(--muted); margin: 0 0 1rem; font-size: 0.92rem; }
     @media (max-width: 640px) {
-      header.app-header .inner { padding: 0.75rem 1rem; }
-      header.app-header h1 { font-size: 1.2rem; }
+      header.app-header .inner { padding: 0.75rem 1rem; gap: 0.4rem; }
+      header.app-header h1 { font-size: 1.15rem; }
+      header.app-header h1 a span { display: none; }
+      header.app-header a.nav, header.app-header button.nav {
+        font-size: 0.78rem; padding: 0.35rem 0.6rem;
+      }
       .wrap { padding: 1rem 1rem 2rem; }
     }
 
@@ -114,13 +207,24 @@
       display: block; font-size: 0.78rem; color: var(--muted);
       margin-bottom: 0.3rem; font-weight: 500;
     }
-    .field input {
+    .field input,
+    .field select {
       width: 100%; padding: 0.5rem 0.75rem;
       background: var(--panel-soft); color: var(--fg);
       border: 1px solid var(--border); border-radius: 8px;
       font-family: ui-monospace, monospace; font-size: 0.86rem;
     }
-    .field input:focus {
+    .field select {
+      font-family: inherit; /* prose dropdown reads better in sans */
+      -webkit-appearance: none; appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%238a92a6' d='M6 8 0 0h12z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 0.7rem center;
+      padding-right: 2rem;
+      cursor: pointer;
+    }
+    .field input:focus,
+    .field select:focus {
       outline: none; border-color: var(--accent);
       box-shadow: 0 0 0 3px rgba(249,168,37,0.18);
     }
@@ -340,17 +444,27 @@
 
   <header class="app-header">
     <div class="inner">
-      <svg width="30" height="30" viewBox="0 0 64 64" aria-hidden="true">
-        <ellipse cx="38" cy="42" rx="20" ry="14" fill="#f9a825"/>
-        <circle cx="22" cy="26" r="11" fill="#f9a825"/>
-        <path d="M 6 26 L 14 22 L 14 30 Z" fill="#ff6f00"/>
-        <circle cx="20" cy="24" r="1.6" fill="#0c0e13"/>
-        <path d="M 30 28 Q 42 14 56 22 Q 50 26 46 24" fill="none" stroke="#c77800" stroke-width="1.2" opacity="0.4"/>
-      </svg>
-      <h1>Ducky <span class="accent">Pool</span></h1>
+      <h1>
+        <a href="{{ url_for('index') }}" title="Dashboard">
+          <svg width="30" height="30" viewBox="0 0 64 64" aria-hidden="true">
+            <ellipse cx="38" cy="42" rx="20" ry="14" fill="#f9a825"/>
+            <circle cx="22" cy="26" r="11" fill="#f9a825"/>
+            <path d="M 6 26 L 14 22 L 14 30 Z" fill="#ff6f00"/>
+            <circle cx="20" cy="24" r="1.6" fill="#0c0e13"/>
+            <path d="M 30 28 Q 42 14 56 22 Q 50 26 46 24" fill="none" stroke="#c77800" stroke-width="1.2" opacity="0.4"/>
+          </svg>
+          <span>Ducky <span class="accent">Pool</span></span>
+        </a>
+      </h1>
       <span class="grow"></span>
+      <a class="nav" href="{{ url_for('index') }}" title="Back to dashboard">← Dashboard</a>
       <a class="nav" href="{{ url_for('health_page') }}" title="System health">⚕ Health</a>
-      <a class="nav" href="{{ url_for('index') }}">← Dashboard</a>
+      <a class="nav current" href="{{ url_for('settings_page') }}" title="Settings" aria-current="page">⚙ Settings</a>
+      {% if settings.auth.enabled %}
+        <form method="post" action="{{ url_for('logout') }}" style="display: inline; margin: 0;">
+          <button type="submit" class="nav" title="Sign out">Sign out</button>
+        </form>
+      {% endif %}
     </div>
   </header>
 
@@ -379,6 +493,25 @@
           <span class="chevron">▼</span>
         </header>
         <div class="body">
+          <div class="field" style="margin-bottom: 0.9rem;">
+            <label for="diff-preset">Preset</label>
+            <select id="diff-preset" class="diff-preset-select">
+              <!-- data-min/start/max use the same shorthand the inputs accept.
+                   "Custom" is selected when no preset matches the live values. -->
+              <option value="mixed"     data-min="1"    data-start="16"     data-max="0">Mixed (recommended) — anything goes</option>
+              <option value="micro"     data-min="1"    data-start="16"     data-max="1M">Micro miners (kH/s–MH/s) — USB / FPGA</option>
+              <option value="small"     data-min="1"    data-start="16"     data-max="100M">Small miners (MH/s–GH/s) — Bitaxe / NerdMiner</option>
+              <option value="home"      data-min="1024"  data-start="8192"   data-max="0">Home ASICs (1–20 TH/s) — NerdQAxe / single S9</option>
+              <option value="farm"      data-min="8192"  data-start="65536"  data-max="0">Farm (20–200 TH/s) — multiple ASICs or MRR rental</option>
+              <option value="mega"      data-min="65536" data-start="262144" data-max="0">Mega (200+ TH/s) — large rental</option>
+              <option value="custom"    data-min=""      data-start=""       data-max="">Custom — set values manually below</option>
+            </select>
+            <div class="field-help">
+              Pick a preset that matches your hardware mix. The fields below auto-fill;
+              edit any of them and this dropdown switches to <strong>Custom</strong>.
+              Saving any change still restarts ckpool.
+            </div>
+          </div>
           <div class="grid-3">
             <div class="field">
               <label for="mindiff">Minimum</label>
@@ -511,6 +644,74 @@
               Useful for cutting noise from small-share workers — e.g. set to
               <code>1M</code> to skip "Decent splash" tier pings.
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Appearance — per-browser theme/font/text-size. Lives outside
+           the form because changes are written to localStorage directly
+           and applied live; nothing to POST. -->
+      <div class="card" data-card="appearance" data-default-collapsed="true">
+        <header class="collapsible">
+          <h2>Appearance
+            <span class="pill" id="appearance-state">Loading…</span>
+          </h2>
+          <span class="chevron">▼</span>
+        </header>
+        <div class="body">
+          <p class="help" style="margin-top: 0;">
+            Per-browser preferences. Saved on this device only — other dashboard
+            users (or you on a different browser) keep their own choices. Applied
+            immediately, no save needed.
+          </p>
+
+          <div class="grid-3" style="margin-top: 0.6rem;">
+            <div class="field">
+              <label for="theme-mode">Mode</label>
+              <select id="theme-mode" class="theme-input">
+                <option value="dark">Dark (default)</option>
+                <option value="light">Light</option>
+                <option value="contrast">High contrast</option>
+                <option value="auto">Auto (follow OS)</option>
+              </select>
+              <div class="field-help">High contrast uses pure black + white + bright yellow accent for readability.</div>
+            </div>
+
+            <div class="field">
+              <label for="theme-size">Text size</label>
+              <select id="theme-size" class="theme-input">
+                <option value="small">Small (14px)</option>
+                <option value="normal">Normal (16px)</option>
+                <option value="large">Large (18px)</option>
+                <option value="xlarge">X-Large (20px)</option>
+              </select>
+              <div class="field-help">Scales every text element proportionally.</div>
+            </div>
+
+            <div class="field">
+              <label for="theme-font">Font</label>
+              <select id="theme-font" class="theme-input">
+                <option value="system">System default</option>
+                <option value="serif">Serif (Georgia)</option>
+                <option value="mono">Monospace</option>
+                <option value="dyslexic">Dyslexia-friendly</option>
+              </select>
+              <div class="field-help">Dyslexic fonts use OpenDyslexic if installed, else Comic Sans MS as a fallback.</div>
+            </div>
+          </div>
+
+          <div class="field" style="margin-top: 0.5rem;">
+            <label for="theme-accent">Accent colour</label>
+            <div class="tier-color-combo" style="max-width: 320px;">
+              <input type="color" id="theme-accent-swatch" class="tier-color-swatch" value="#f9a825" aria-label="Pick accent colour">
+              <input type="text" id="theme-accent" class="theme-input" value="" maxlength="7" placeholder="#f9a825 (default)">
+              <button type="button" class="ghost" id="theme-accent-clear" title="Reset to default amber">Reset</button>
+            </div>
+            <div class="field-help">Picker writes the hex; clear resets to the default amber. Used everywhere the dashboard shows yellow/orange.</div>
+          </div>
+
+          <div class="actions-bar" style="margin-top: 0.75rem;">
+            <button type="button" class="ghost" id="theme-reset-all">Reset all to defaults</button>
           </div>
         </div>
       </div>
@@ -674,6 +875,211 @@
   }
   applyCollapseState();
   bindCollapseHandlers();
+
+  // ── Theme controller (Appearance card) ──────────────────────
+  // Live-applies localStorage changes without a page reload. Same
+  // attribute-and-CSS-variable logic as the head bootstrap.
+  (function themeController() {
+    const LS = 'ducky-theme:';
+    const modeEl   = document.getElementById('theme-mode');
+    const sizeEl   = document.getElementById('theme-size');
+    const fontEl   = document.getElementById('theme-font');
+    const accentEl = document.getElementById('theme-accent');
+    const swatchEl = document.getElementById('theme-accent-swatch');
+    const clearEl  = document.getElementById('theme-accent-clear');
+    const resetEl  = document.getElementById('theme-reset-all');
+    const stateEl  = document.getElementById('appearance-state');
+    if (!modeEl) return;
+
+    function applyMode(mode) {
+      // 'auto' resolves at apply time; we set the attr only for concrete
+      // modes so the default-dark :root still wins.
+      let resolved = mode;
+      if (mode === 'auto') {
+        const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+        resolved = prefersLight ? 'light' : 'dark';
+      }
+      if (resolved === 'light' || resolved === 'contrast') {
+        document.documentElement.setAttribute('data-theme', resolved);
+      } else {
+        document.documentElement.removeAttribute('data-theme');
+      }
+    }
+    function applySize(size) {
+      if (size && size !== 'normal') {
+        document.documentElement.setAttribute('data-text-size', size);
+      } else {
+        document.documentElement.removeAttribute('data-text-size');
+      }
+    }
+    function applyFont(font) {
+      if (font && font !== 'system') {
+        document.documentElement.setAttribute('data-font', font);
+      } else {
+        document.documentElement.removeAttribute('data-font');
+      }
+    }
+    function applyAccent(hex) {
+      if (!hex) {
+        document.documentElement.style.removeProperty('--accent');
+        document.documentElement.style.removeProperty('--accent-deep');
+        return;
+      }
+      const clean = hex.replace(/^#/, '');
+      if (!/^[0-9a-f]{6}$/i.test(clean)) return;
+      document.documentElement.style.setProperty('--accent', '#' + clean);
+      const r = parseInt(clean.slice(0, 2), 16);
+      const g = parseInt(clean.slice(2, 4), 16);
+      const b = parseInt(clean.slice(4, 6), 16);
+      const dim = c => Math.max(0, Math.floor(c * 0.75)).toString(16).padStart(2, '0');
+      document.documentElement.style.setProperty('--accent-deep', '#' + dim(r) + dim(g) + dim(b));
+    }
+
+    function flashState(text) {
+      if (!stateEl) return;
+      stateEl.textContent = text;
+      stateEl.classList.add('ok');
+      clearTimeout(flashState._t);
+      flashState._t = setTimeout(() => {
+        stateEl.classList.remove('ok');
+        stateEl.textContent = 'Active';
+      }, 1200);
+    }
+
+    // Initialise dropdowns from stored values
+    modeEl.value   = localStorage.getItem(LS + 'mode')   || 'dark';
+    sizeEl.value   = localStorage.getItem(LS + 'size')   || 'normal';
+    fontEl.value   = localStorage.getItem(LS + 'font')   || 'system';
+    const storedAccent = localStorage.getItem(LS + 'accent') || '';
+    if (storedAccent) {
+      const v = storedAccent.startsWith('#') ? storedAccent : '#' + storedAccent;
+      accentEl.value = v;
+      if (/^#[0-9a-f]{6}$/i.test(v)) swatchEl.value = v;
+    }
+    if (stateEl) stateEl.textContent = 'Active';
+
+    // Bind change handlers
+    modeEl.addEventListener('change', () => {
+      localStorage.setItem(LS + 'mode', modeEl.value);
+      applyMode(modeEl.value);
+      flashState('Saved');
+    });
+    sizeEl.addEventListener('change', () => {
+      localStorage.setItem(LS + 'size', sizeEl.value);
+      applySize(sizeEl.value);
+      flashState('Saved');
+    });
+    fontEl.addEventListener('change', () => {
+      localStorage.setItem(LS + 'font', fontEl.value);
+      applyFont(fontEl.value);
+      flashState('Saved');
+    });
+    // Accent: swatch and text input cross-update
+    swatchEl.addEventListener('input', () => {
+      accentEl.value = swatchEl.value;
+      localStorage.setItem(LS + 'accent', swatchEl.value.replace(/^#/, ''));
+      applyAccent(swatchEl.value);
+      flashState('Saved');
+    });
+    accentEl.addEventListener('input', () => {
+      const v = accentEl.value.trim();
+      const clean = v.replace(/^#/, '');
+      if (/^[0-9a-f]{6}$/i.test(clean)) {
+        swatchEl.value = '#' + clean;
+        localStorage.setItem(LS + 'accent', clean);
+        applyAccent('#' + clean);
+        flashState('Saved');
+      }
+    });
+    clearEl.addEventListener('click', () => {
+      accentEl.value = '';
+      localStorage.removeItem(LS + 'accent');
+      applyAccent(null);
+      flashState('Reset');
+    });
+    resetEl.addEventListener('click', () => {
+      if (!confirm('Reset all appearance preferences on this browser to defaults?')) return;
+      ['mode', 'size', 'font', 'accent'].forEach(k => localStorage.removeItem(LS + k));
+      modeEl.value = 'dark';
+      sizeEl.value = 'normal';
+      fontEl.value = 'system';
+      accentEl.value = '';
+      swatchEl.value = '#f9a825';
+      applyMode('dark');
+      applySize('normal');
+      applyFont('system');
+      applyAccent(null);
+      flashState('Reset');
+    });
+  })();
+
+  // ── Stratum difficulty preset selector ────────────────────────
+  // Picking a preset auto-fills the three diff inputs. Editing any
+  // input switches the dropdown to "Custom". On load, we try to
+  // match the current values against the known presets.
+  (function diffPresetController() {
+    const sel = document.getElementById('diff-preset');
+    const minEl = document.getElementById('mindiff');
+    const startEl = document.getElementById('startdiff');
+    const maxEl = document.getElementById('maxdiff');
+    if (!sel || !minEl || !startEl || !maxEl) return;
+
+    // Normalise shorthand to a canonical raw integer string so user
+    // input ("1k", "1K", "1000") compares equal to preset-shorthand.
+    // Mirrors the server's parse_diff but in a small JS form.
+    function normalise(v) {
+      if (v === undefined || v === null) return '';
+      const s = String(v).trim().replace(/[\s,_]/g, '').toLowerCase();
+      if (s === '' || s === '0') return '0';
+      const m = s.match(/^([0-9]*\.?[0-9]+)\s*([kmgtpe]?)$/);
+      if (!m) return s;  // unparseable; let strict equality handle it
+      const num = parseFloat(m[1]);
+      const mult = { '': 1, k: 1e3, m: 1e6, g: 1e9, t: 1e12, p: 1e15, e: 1e18 }[m[2]] || 1;
+      return String(Math.round(num * mult));
+    }
+
+    function matchPreset() {
+      const cur = {
+        min:   normalise(minEl.value),
+        start: normalise(startEl.value),
+        max:   normalise(maxEl.value),
+      };
+      for (const opt of sel.options) {
+        if (opt.value === 'custom') continue;
+        if (
+          normalise(opt.dataset.min)   === cur.min &&
+          normalise(opt.dataset.start) === cur.start &&
+          normalise(opt.dataset.max)   === cur.max
+        ) {
+          return opt.value;
+        }
+      }
+      return 'custom';
+    }
+
+    function applyPreset() {
+      const opt = sel.selectedOptions[0];
+      if (!opt || opt.value === 'custom') return;
+      // Show shorthand values in the inputs (1K, not 1000) — matches
+      // how mindiff_h etc. render server-side.
+      minEl.value   = opt.dataset.min   || '1';
+      startEl.value = opt.dataset.start || '1';
+      maxEl.value   = opt.dataset.max   || '0';
+    }
+
+    sel.addEventListener('change', applyPreset);
+
+    // Re-detect preset on any input change. 'input' fires per-keystroke
+    // so the dropdown updates live as the user types.
+    [minEl, startEl, maxEl].forEach(el => {
+      el.addEventListener('input', () => {
+        sel.value = matchPreset();
+      });
+    });
+
+    // Initial detection on load.
+    sel.value = matchPreset();
+  })();
 
   // ── auth toggle: show/hide password fields based on enable state ──
   (function authFieldToggle() {
