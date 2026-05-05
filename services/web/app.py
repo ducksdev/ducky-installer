@@ -44,6 +44,25 @@ from flask import (
 
 app = Flask(__name__)
 
+# Module-level constants for the dashboard footer.
+APP_STARTED_AT = int(time.time())
+APP_VERSION = os.environ.get("APP_VERSION", "1.0")
+GITHUB_URL = os.environ.get("GITHUB_URL", "https://github.com/ducksdev/ducky-installer")
+
+
+@app.context_processor
+def _inject_footer_globals():
+    """Make footer values available to every template without each
+    route having to pass them. Uptime is computed per-request so the
+    footer ticks up live on each page load."""
+    uptime_s = max(0, int(time.time()) - APP_STARTED_AT)
+    return {
+        "footer_uptime_s": uptime_s,
+        "footer_uptime_human": humanise_duration(uptime_s),
+        "footer_version": APP_VERSION,
+        "footer_github": GITHUB_URL,
+    }
+
 
 def _load_or_create_flask_secret() -> str:
     """Persistent Flask secret. Stored in /shared so it survives container
@@ -179,11 +198,16 @@ SHARE_TAIL_INTERVAL = int(os.environ.get("SHARE_TAIL_INTERVAL", "2"))
 
 LEGACY_BCH_RE = re.compile(r"^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$")
 CASHADDR_RE = re.compile(r"^(bitcoincash:)?[qp][a-z0-9]{40,}$", re.IGNORECASE)
-# File on disk in /users is just the Base58 BCH address.
-USER_FILENAME_RE = re.compile(r"^[a-km-zA-HJ-NP-Z1-9]{25,40}$")
+# File on disk in /users may be either a Base58 BCH address (legacy form)
+# OR a CashAddr-shaped string (qzy..., 42 chars), depending on what username
+# the miner originally authed with. ckpool just saves the username as the
+# filename, with optional `bitcoincash:` prefix or colons. We match a wide
+# range of shapes so neither variant is silently skipped on the dashboard.
+# The contents are still validated when we open and parse the file.
+USER_FILENAME_RE = re.compile(r"^(bitcoincash:)?[a-zA-Z0-9]{25,70}$")
 # Synthetic worker ID used in dashboard URLs and baseline keys: <address>.<workername>.
 # Keep this in sync with how ckpool emits "workername" in the user file's `worker` array.
-WORKER_ID_RE = re.compile(r"^[a-km-zA-HJ-NP-Z1-9]{25,40}\.[A-Za-z0-9_\-]+$")
+WORKER_ID_RE = re.compile(r"^(bitcoincash:)?[a-zA-Z0-9]{25,70}\.[A-Za-z0-9_\-]+$")
 # Backwards-compat alias so existing call sites still work.
 WORKER_FILENAME_RE = WORKER_ID_RE
 
@@ -254,6 +278,31 @@ def humanise_age(seconds: float | None) -> str:
     if s < 86400:
         return f"{s // 3600}h ago"
     return f"{s // 86400}d ago"
+
+
+def humanise_duration(seconds: float | None) -> str:
+    """Human-readable duration WITHOUT 'ago' suffix. Used for uptime
+    displays where the value isn't a relative timestamp.
+    Examples: 30s -> '30s', 95s -> '1m 35s', 7320s -> '2h 2m',
+    400000s -> '4d 15h'. Falls through to '—' for None.
+    """
+    if seconds is None:
+        return "—"
+    s = int(seconds)
+    if s < 0:
+        s = 0
+    if s < 60:
+        return f"{s}s"
+    if s < 3600:
+        m, sec = divmod(s, 60)
+        return f"{m}m {sec}s" if sec else f"{m}m"
+    if s < 86400:
+        h, rem = divmod(s, 3600)
+        m = rem // 60
+        return f"{h}h {m}m" if m else f"{h}h"
+    d, rem = divmod(s, 86400)
+    h = rem // 3600
+    return f"{d}d {h}h" if h else f"{d}d"
 
 
 def humanise_diff(n: float | int | None) -> str:
@@ -3019,6 +3068,97 @@ def health_page():
 @login_required_json
 def api_health():
     return jsonify(health_payload())
+
+
+@app.route("/api/check-updates", methods=["POST"])
+@login_required_json
+def api_check_updates():
+    """Compare the install-time commit SHA against the current head of
+    the same branch on GitHub. Returns a JSON dict the dashboard renders
+    inline. All failure paths return 200 with ok=False + an error
+    string — never raise — because this is a best-effort feature.
+    """
+    meta_path = os.path.join(STATE_DIR, "install_meta.json")
+    if not os.path.exists(meta_path):
+        return jsonify({
+            "ok": False,
+            "error": "install metadata missing — re-run install.sh to enable update checks",
+        })
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+    except (OSError, ValueError) as exc:
+        return jsonify({"ok": False, "error": f"could not read install metadata: {exc}"})
+
+    installed_sha = (meta.get("sha") or "").strip()
+    branch = (meta.get("branch") or "main").strip()
+    repo = (meta.get("repo") or "ducksdev/ducky-installer").strip()
+    if not installed_sha:
+        return jsonify({
+            "ok": False,
+            "error": "install SHA not recorded — re-run install.sh on a network with GitHub access",
+            "branch": branch,
+        })
+
+    # Hit GitHub's commits API. Unauthenticated, 60/hr per IP — enough.
+    api_url = f"https://api.github.com/repos/{repo}/commits/{branch}"
+    try:
+        resp = requests.get(api_url, timeout=8, headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "ducky-pool-update-check",
+        })
+        resp.raise_for_status()
+        data = resp.json()
+    except requests.HTTPError as exc:
+        return jsonify({
+            "ok": False,
+            "error": f"GitHub API error: {exc.response.status_code} {exc.response.reason}",
+            "branch": branch,
+        })
+    except (requests.RequestException, ValueError) as exc:
+        return jsonify({"ok": False, "error": f"network error: {exc}", "branch": branch})
+
+    latest_sha = (data.get("sha") or "").strip()
+    if not latest_sha:
+        return jsonify({
+            "ok": False,
+            "error": "GitHub response missing SHA",
+            "branch": branch,
+        })
+
+    up_to_date = installed_sha == latest_sha
+
+    # Count commits behind. /compare endpoint gives total_commits.
+    # Skip the call if up_to_date — saves a request and a rate slot.
+    behind = 0
+    if not up_to_date:
+        compare_url = f"https://api.github.com/repos/{repo}/compare/{installed_sha}...{latest_sha}"
+        try:
+            r2 = requests.get(compare_url, timeout=8, headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "ducky-pool-update-check",
+            })
+            if r2.ok:
+                behind = int(r2.json().get("total_commits", 0) or 0)
+        except (requests.RequestException, ValueError):
+            # Non-fatal — we can still tell the user there's an update.
+            behind = 0
+
+    return jsonify({
+        "ok": True,
+        "up_to_date": up_to_date,
+        "installed_sha": installed_sha[:8],
+        "latest_sha": latest_sha[:8],
+        "installed_sha_full": installed_sha,
+        "latest_sha_full": latest_sha,
+        "branch": branch,
+        "repo": repo,
+        "behind": behind,
+        "compare_url": (
+            f"https://github.com/{repo}/compare/{installed_sha[:12]}...{latest_sha[:12]}"
+            if not up_to_date else None
+        ),
+    })
 
 
 @app.route("/api/logs/<service>", methods=["GET"])

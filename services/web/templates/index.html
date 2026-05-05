@@ -201,6 +201,176 @@
       .wrap { padding: 1rem 1rem 2rem; }
     }
 
+    /* ── footer ─────────────────────────────────────────────────── */
+    .app-footer {
+      border-top: 1px solid var(--border);
+      margin-top: 1.5rem;
+      padding: 1.1rem 1.5rem 1.4rem;
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+    .app-footer .inner {
+      max-width: 1280px; margin: 0 auto;
+      display: flex; flex-wrap: wrap; align-items: center;
+      gap: 0.4rem 0.6rem;
+      justify-content: center;
+    }
+    .app-footer a {
+      color: var(--muted);
+      text-decoration: none;
+      transition: color 0.15s;
+    }
+    .app-footer a:hover { color: var(--accent); }
+    .footer-sep { opacity: 0.4; }
+    .footer-duck {
+      display: inline-block;
+      transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .footer-brand:hover .footer-duck {
+      transform: rotate(-15deg) scale(1.2);
+    }
+    .footer-link::after { /* slightly nicer arrow alignment */
+      display: inline-block;
+      transform: translateY(-1px);
+    }
+    @media (max-width: 540px) {
+      .app-footer { padding: 0.9rem 1rem 1.1rem; font-size: 0.74rem; }
+      .app-footer .inner { gap: 0.3rem 0.5rem; }
+    }
+
+    /* ── Block found celebration overlay ───────────────────────── */
+    .celebrate-overlay {
+      position: fixed; inset: 0;
+      background: rgba(12, 14, 19, 0.86);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      z-index: 200;
+      display: flex; align-items: center; justify-content: center;
+      padding: 2rem;
+      animation: celebrate-in 0.3s ease-out;
+    }
+    :root[data-theme="light"] .celebrate-overlay {
+      background: rgba(244, 245, 248, 0.86);
+    }
+    :root[data-theme="contrast"] .celebrate-overlay {
+      background: rgba(0, 0, 0, 0.94);
+    }
+    @keyframes celebrate-in {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+    .celebrate-card {
+      background: linear-gradient(180deg, var(--panel) 0%, var(--bg) 100%);
+      border: 2px solid var(--success);
+      border-radius: 16px;
+      padding: 2rem 2.5rem;
+      max-width: 520px; width: 100%;
+      text-align: center;
+      position: relative; z-index: 2;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      animation: celebrate-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    @keyframes celebrate-pop {
+      from { transform: scale(0.7); opacity: 0; }
+      to   { transform: scale(1);   opacity: 1; }
+    }
+    .celebrate-card::before {
+      content: ''; position: absolute; inset: 0;
+      background: radial-gradient(circle at 50% 0%, rgba(76, 217, 100, 0.18), transparent 60%);
+      border-radius: inherit;
+      pointer-events: none;
+    }
+    .celebrate-emoji {
+      font-size: 4.5rem; line-height: 1;
+      margin-bottom: 0.5rem;
+      display: inline-block;
+      animation: bobble 2.4s ease-in-out infinite;
+    }
+    @keyframes bobble {
+      0%, 100% { transform: translateY(0) rotate(-3deg); }
+      50%      { transform: translateY(-8px) rotate(3deg); }
+    }
+    .celebrate-title {
+      font-size: 1.75rem; font-weight: 600;
+      color: var(--fg);
+      margin: 0 0 0.5rem;
+      letter-spacing: -0.01em;
+    }
+    .celebrate-title .accent { color: var(--success); }
+    .celebrate-tagline {
+      font-size: 0.9rem; color: var(--muted);
+      margin: 0 0 1.5rem;
+      font-style: italic;
+    }
+    .celebrate-stats {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+    .cstat {
+      background: var(--panel-soft);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.6rem 0.75rem;
+      text-align: left;
+    }
+    .cstat-label {
+      font-size: 0.66rem; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.07em;
+    }
+    .cstat-value {
+      font-size: 1rem; color: var(--fg); font-weight: 600;
+      font-family: ui-monospace, monospace;
+      margin-top: 0.15rem;
+    }
+    .cstat-value.green { color: var(--success); }
+    .celebrate-hash {
+      background: var(--panel-soft);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.6rem 0.75rem;
+      margin-bottom: 1rem;
+      text-align: left;
+    }
+    .celebrate-actions {
+      display: flex; gap: 0.5rem; justify-content: center;
+      flex-wrap: wrap;
+    }
+    .cbtn {
+      padding: 0.5rem 1.1rem;
+      border-radius: 8px;
+      font-size: 0.85rem; font-weight: 500;
+      cursor: pointer;
+      border: 1px solid var(--success);
+      background: transparent;
+      color: var(--success);
+      font-family: inherit;
+      text-decoration: none;
+      display: inline-block;
+      transition: background 0.15s, color 0.15s;
+    }
+    .cbtn:hover { background: var(--panel-soft); }
+    .cbtn.primary { background: var(--success); color: var(--bg); }
+    .cbtn.primary:hover { opacity: 0.9; background: var(--success); }
+
+    /* Confetti container fills the overlay, behind the card. JS spawns
+       individual .confetti-piece divs into it. */
+    .celebrate-confetti {
+      position: absolute; inset: 0;
+      overflow: hidden; pointer-events: none;
+      z-index: 1;
+    }
+    .confetti-piece {
+      position: absolute;
+      width: 8px; height: 14px;
+      top: -20px;
+      animation: confetti-fall linear infinite;
+    }
+    @keyframes confetti-fall {
+      0%   { transform: translateY(0)    rotate(0deg);   opacity: 1; }
+      100% { transform: translateY(110vh) rotate(720deg); opacity: 0.4; }
+    }
+
     /* ── card ──────────────────────────────────────────────────── */
     .card {
       background: var(--panel); border: 1px solid var(--border);
@@ -900,6 +1070,60 @@
 
   </div>
 
+  <footer class="app-footer">
+    <div class="inner">
+      <span class="footer-brand">Made with <span class="footer-duck">🦆</span> by <a href="{{ footer_github }}" target="_blank" rel="noopener">ducksdev</a></span>
+      <span class="footer-sep" aria-hidden="true">·</span>
+      <span class="footer-uptime" title="Web app uptime — pool service may have been running longer">Up {{ footer_uptime_human }}</span>
+      <span class="footer-sep" aria-hidden="true">·</span>
+      <span class="footer-version">v{{ footer_version }}</span>
+      <span class="footer-sep" aria-hidden="true">·</span>
+      <a class="footer-link" href="{{ footer_github }}" target="_blank" rel="noopener">GitHub ↗</a>
+    </div>
+  </footer>
+
+  <!-- Block found celebration overlay. Hidden by default; the
+       checkBlockOverlay() JS shows it when blocks.count grows. -->
+  <div id="block-overlay" class="celebrate-overlay" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="celebrate-title">
+    <div class="celebrate-confetti" id="celebrate-confetti"></div>
+    <div class="celebrate-card">
+      <div class="celebrate-emoji">🦆🍞</div>
+      <h2 class="celebrate-title" id="celebrate-title">BLOCK <span class="accent">FOUND!</span></h2>
+      <p class="celebrate-tagline">The duck got the bread.</p>
+      <div class="celebrate-stats">
+        <div class="cstat">
+          <div class="cstat-label">Block height</div>
+          <div class="cstat-value green" id="celebrate-height">—</div>
+        </div>
+        <div class="cstat">
+          <div class="cstat-label">Reward (estimated)</div>
+          <div class="cstat-value green" id="celebrate-reward">—</div>
+        </div>
+        <div class="cstat">
+          <div class="cstat-label">Found by</div>
+          <div class="cstat-value" id="celebrate-worker">—</div>
+        </div>
+        <div class="cstat">
+          <div class="cstat-label">When</div>
+          <div class="cstat-value" id="celebrate-when">just now</div>
+        </div>
+      </div>
+      <div class="celebrate-hash" id="celebrate-hash-wrap" style="display: none;">
+        <div class="cstat-label">Block hash</div>
+        <div class="cstat-value" id="celebrate-hash" style="font-size: 0.8rem; color: var(--accent); word-break: break-all;">—</div>
+      </div>
+      <div class="celebrate-actions">
+        <a id="celebrate-explorer" class="cbtn primary" href="#" target="_blank" rel="noopener">View on Blockchair ↗</a>
+        <button type="button" class="cbtn" id="celebrate-dismiss">Dismiss</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Initial blocks state, used by the overlay JS for first-paint
+       detection (so a user landing on the page right after a block is
+       found gets the overlay without waiting for the next 10s poll). -->
+  <script type="application/json" id="initial-blocks">{{ blocks | tojson | safe }}</script>
+
   <script>
   const PUBLIC_VIEW = {{ 'true' if public else 'false' }};
   const STATS_URL   = PUBLIC_VIEW ? '/api/public/stats' : '/api/stats';
@@ -1265,6 +1489,133 @@
   });
 
   // ── main poll ──────────────────────────────────────────────────
+  // ── Block found celebration ────────────────────────────────────
+  // Detects when blocks.count grows between polls and shows the
+  // celebration overlay. Last-seen height is stored per-browser so a
+  // reload doesn't re-trigger; dismissal is tracked per-block height
+  // so dismissing one block doesn't suppress future ones.
+  const BLOCK_LS = {
+    lastSeen: 'ducky-block-last-seen-height',
+    dismissed: 'ducky-block-dismissed:',  // suffix with height
+  };
+
+  function bchBlockReward(height) {
+    // BCH halving schedule: 50 BCH → 25 → 12.5 → 6.25 → 3.125 → ...
+    // every 210,000 blocks. Returns BCH (excluding fees, which we
+    // can't know without the actual coinbase tx).
+    if (typeof height !== 'number' || height < 1) return null;
+    const era = Math.floor(height / 210000);
+    return 50 / Math.pow(2, era);
+  }
+
+  function spawnConfetti(container) {
+    container.innerHTML = '';
+    const colors = ['#4cd964', '#f9a825', '#ff6b6b', '#5b8aa6', '#c77800'];
+    for (let i = 0; i < 32; i++) {
+      const piece = document.createElement('div');
+      piece.className = 'confetti-piece';
+      piece.style.left = (Math.random() * 100) + '%';
+      piece.style.background = colors[Math.floor(Math.random() * colors.length)];
+      // Stagger durations + delays so the fall feels organic
+      piece.style.animationDuration = (2.5 + Math.random() * 2.5) + 's';
+      piece.style.animationDelay = (Math.random() * 1.5) + 's';
+      piece.style.transform = 'rotate(' + (Math.random() * 360) + 'deg)';
+      container.appendChild(piece);
+    }
+  }
+
+  function showBlockOverlay(block) {
+    const overlay = document.getElementById('block-overlay');
+    if (!overlay) return;
+    document.getElementById('celebrate-height').textContent =
+      block.height ? Number(block.height).toLocaleString() : '—';
+    const reward = bchBlockReward(block.height);
+    document.getElementById('celebrate-reward').textContent =
+      reward !== null ? '~' + reward.toFixed(reward < 1 ? 4 : 3) + ' BCH' : '—';
+    document.getElementById('celebrate-worker').textContent = block.worker || '—';
+    // When: relative to NOW (not block.ts which could be older if found
+    // while you were offline)
+    if (block.ts) {
+      const ageS = Math.max(0, Math.floor(Date.now() / 1000 - block.ts));
+      document.getElementById('celebrate-when').textContent =
+        ageS < 60 ? 'just now' :
+        ageS < 3600 ? Math.floor(ageS / 60) + 'm ago' :
+        Math.floor(ageS / 3600) + 'h ago';
+    } else {
+      document.getElementById('celebrate-when').textContent = 'just now';
+    }
+    if (block.hash) {
+      document.getElementById('celebrate-hash-wrap').style.display = '';
+      document.getElementById('celebrate-hash').textContent = block.hash;
+      document.getElementById('celebrate-explorer').href =
+        'https://blockchair.com/bitcoin-cash/block/' + block.hash;
+    } else {
+      document.getElementById('celebrate-hash-wrap').style.display = 'none';
+      document.getElementById('celebrate-explorer').href =
+        'https://blockchair.com/bitcoin-cash/block/' + block.height;
+    }
+    spawnConfetti(document.getElementById('celebrate-confetti'));
+    overlay.style.display = 'flex';
+  }
+
+  function dismissBlockOverlay() {
+    const overlay = document.getElementById('block-overlay');
+    if (overlay) overlay.style.display = 'none';
+  }
+
+  function checkBlockOverlay(blocks) {
+    if (!blocks || !blocks.latest) return;
+    const latest = blocks.latest;
+    const height = latest.height;
+    if (typeof height !== 'number') return;
+    const lastSeenStr = localStorage.getItem(BLOCK_LS.lastSeen);
+    const lastSeen = lastSeenStr ? parseInt(lastSeenStr, 10) : null;
+    // On VERY first load (no lastSeen at all), record the current
+    // height silently. Don't fire — the user has clearly seen this
+    // block already (it's the historical one, not new).
+    if (lastSeen === null) {
+      localStorage.setItem(BLOCK_LS.lastSeen, String(height));
+      return;
+    }
+    if (height > lastSeen) {
+      // New block since last poll. Check the per-block dismissal flag
+      // so a previously-dismissed overlay (across reloads) doesn't
+      // pop again on this same block.
+      const dismissed = localStorage.getItem(BLOCK_LS.dismissed + height);
+      if (!dismissed) {
+        showBlockOverlay(latest);
+      }
+      localStorage.setItem(BLOCK_LS.lastSeen, String(height));
+    }
+  }
+
+  // Wire the dismiss button + escape key
+  document.addEventListener('DOMContentLoaded', () => {
+    const dismissBtn = document.getElementById('celebrate-dismiss');
+    if (dismissBtn) {
+      dismissBtn.addEventListener('click', () => {
+        // Mark this block as dismissed so it doesn't reappear on reload
+        const heightEl = document.getElementById('celebrate-height');
+        const heightTxt = heightEl ? heightEl.textContent.replace(/[^\d]/g, '') : '';
+        if (heightTxt) localStorage.setItem(BLOCK_LS.dismissed + heightTxt, '1');
+        dismissBlockOverlay();
+      });
+    }
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') dismissBlockOverlay();
+    });
+    // Initial-paint check using the server-rendered blocks JSON. If a
+    // user lands on the dashboard the moment a block is found, this
+    // fires within a few ms instead of waiting for the next poll.
+    try {
+      const initEl = document.getElementById('initial-blocks');
+      if (initEl) {
+        const data = JSON.parse(initEl.textContent || 'null');
+        if (data) checkBlockOverlay(data);
+      }
+    } catch (e) { /* malformed embed — next poll will catch up */ }
+  });
+
   async function poll() {
     try {
       const r = await fetch(STATS_URL, { cache: 'no-store' });
@@ -1281,6 +1632,7 @@
       document.getElementById('pool-body').innerHTML = renderPool(data.pool, data.eta, (data.workers || []).length, data.net_diff_human);
       applyBestShareMode();
       document.getElementById('blocks-body').innerHTML = renderBlocks(data.blocks);
+      checkBlockOverlay(data.blocks);
       document.getElementById('miners-body').innerHTML = renderWorkers(data.workers);
       // Duck-O-Meter grid — only present if there are workers.
       const duckBody = document.getElementById('duck-o-meters-body');
