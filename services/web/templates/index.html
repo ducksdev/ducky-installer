@@ -299,6 +299,30 @@
       font-size: 0.7rem; color: var(--muted); margin-top: 0.15rem;
       font-family: ui-monospace, monospace;
     }
+    /* Best share is clickable to cycle through modes (ever / since
+       last reset / since last block / current block). The ⟳ next to
+       the label is the affordance. */
+    .best-share-stat {
+      cursor: pointer;
+      transition: background-color 0.15s, border-color 0.15s;
+      user-select: none;
+    }
+    .best-share-stat:hover {
+      background: var(--panel-soft);
+      border-color: var(--accent);
+    }
+    .best-share-cycle {
+      font-size: 0.7em; opacity: 0.5;
+      margin-left: 0.25rem;
+      transition: opacity 0.15s, transform 0.4s;
+      display: inline-block;
+    }
+    .best-share-stat:hover .best-share-cycle {
+      opacity: 1;
+    }
+    .best-share-stat.cycling .best-share-cycle {
+      transform: rotate(360deg);
+    }
     @media (max-width: 800px) { .stats.cols-4 { grid-template-columns: repeat(2, 1fr); } }
     @media (max-width: 420px) { .stats.cols-4, .stats { grid-template-columns: 1fr; } }
 
@@ -580,7 +604,16 @@
                     </div>
                   </div>
                   <div class="stat"><div class="stat-label">Net diff</div><div class="stat-value" title="Current Bitcoin Cash network difficulty. Your share has to beat this to find a block.">{{ net_diff_human or "—" }}</div></div>
-                  <div class="stat"><div class="stat-label">Best share</div><div class="stat-value">{{ pool.best_share }}</div></div>
+                  <div class="stat best-share-stat" id="best-share-stat"
+                       data-mode="since_reset"
+                       data-best-since-reset="{{ pool.best_share }}"
+                       data-best-ever="{{ pool.best_shares.ever if pool.best_shares else pool.best_share }}"
+                       data-best-since-block-found="{{ pool.best_shares.since_block_found if pool.best_shares else pool.best_share }}"
+                       data-best-current-block="{{ pool.best_shares.current_block if pool.best_shares else pool.best_share }}"
+                       title="Click to cycle: Since reset → Ever → Since last block → Current block">
+                    <div class="stat-label" id="best-share-label">Best share <span class="best-share-cycle" aria-hidden="true">⟳</span></div>
+                    <div class="stat-value" id="best-share-value">{{ pool.best_share }}</div>
+                  </div>
                 </div>
                 {% if eta and eta.ok %}
                   <p class="help">Block ETA at current hashrate: <span class="mono">{{ eta.human }}</span> · <span class="mono">{{ eta.per_year_human }}</span></p>
@@ -901,6 +934,55 @@
     }[c]));
   }
 
+  // ── Best share cycle ──────────────────────────────────────────
+  // The Best share stat is clickable: each click rotates through
+  // four modes. Choice persists per-browser in localStorage so a
+  // reload doesn't reset it. After every poll-driven re-render of
+  // the pool card we re-apply the user's chosen mode.
+  const BEST_SHARE_MODES = ['since_reset', 'ever', 'since_block_found', 'current_block'];
+  const BEST_SHARE_LABELS = {
+    since_reset:        'Best share (since reset)',
+    ever:               'Best share (ever)',
+    since_block_found:  'Best share (since last block)',
+    current_block:      'Best share (current block)',
+  };
+  const BEST_SHARE_LS = 'ducky-best-share-mode';
+
+  function applyBestShareMode() {
+    const node = document.getElementById('best-share-stat');
+    if (!node) return;
+    let mode = localStorage.getItem(BEST_SHARE_LS) || 'since_reset';
+    if (!BEST_SHARE_MODES.includes(mode)) mode = 'since_reset';
+    node.dataset.mode = mode;
+    const value = node.dataset['best' +
+      mode.replace(/(^|_)([a-z])/g, (_, __, c) => c.toUpperCase())] || '—';
+    // ^ "since_reset" → "SinceReset" → reads data-best-since-reset
+    const valEl = document.getElementById('best-share-value');
+    const lblEl = document.getElementById('best-share-label');
+    if (valEl) valEl.textContent = value;
+    if (lblEl) lblEl.innerHTML = escapeHtml(BEST_SHARE_LABELS[mode]) +
+      ' <span class="best-share-cycle" aria-hidden="true">⟳</span>';
+  }
+
+  // Delegated click handler — works regardless of how many times
+  // the pool card re-renders.
+  document.addEventListener('click', e => {
+    const stat = e.target.closest('.best-share-stat');
+    if (!stat) return;
+    const cur = stat.dataset.mode || 'since_reset';
+    const idx = BEST_SHARE_MODES.indexOf(cur);
+    const next = BEST_SHARE_MODES[(idx + 1) % BEST_SHARE_MODES.length];
+    localStorage.setItem(BEST_SHARE_LS, next);
+    // Trigger the spin animation
+    stat.classList.remove('cycling');
+    void stat.offsetWidth; // force reflow so the next add restarts the transition
+    stat.classList.add('cycling');
+    applyBestShareMode();
+  });
+
+  // Apply on initial paint
+  document.addEventListener('DOMContentLoaded', applyBestShareMode);
+
   // ── renderers ──────────────────────────────────────────────────
   function renderNode(s) {
     const pillEl = document.getElementById('node-pill');
@@ -945,7 +1027,16 @@
           </div>
         </div>
         <div class="stat"><div class="stat-label">Net diff</div><div class="stat-value" title="Current Bitcoin Cash network difficulty. Your share has to beat this to find a block.">${escapeHtml(String(netDiffHuman || '—'))}</div></div>
-        <div class="stat"><div class="stat-label">Best share</div><div class="stat-value">${fmtDiff(p.best_share)}</div></div>
+        <div class="stat best-share-stat" id="best-share-stat"
+             data-mode="since_reset"
+             data-best-since-reset="${escapeHtml(String(fmtDiff(p.best_share)))}"
+             data-best-ever="${escapeHtml(String(p.best_shares ? fmtDiff(p.best_shares.ever) : fmtDiff(p.best_share)))}"
+             data-best-since-block-found="${escapeHtml(String(p.best_shares ? fmtDiff(p.best_shares.since_block_found) : fmtDiff(p.best_share)))}"
+             data-best-current-block="${escapeHtml(String(p.best_shares ? fmtDiff(p.best_shares.current_block) : fmtDiff(p.best_share)))}"
+             title="Click to cycle: Since reset → Ever → Since last block → Current block">
+          <div class="stat-label" id="best-share-label">Best share <span class="best-share-cycle" aria-hidden="true">⟳</span></div>
+          <div class="stat-value" id="best-share-value">${fmtDiff(p.best_share)}</div>
+        </div>
       </div>${etaLine}${ageLine}`;
   }
 
@@ -1155,6 +1246,7 @@
       const data = await r.json();
       document.getElementById('node-body').innerHTML = renderNode(data.node);
       document.getElementById('pool-body').innerHTML = renderPool(data.pool, data.eta, (data.workers || []).length, data.net_diff_human);
+      applyBestShareMode();
       document.getElementById('blocks-body').innerHTML = renderBlocks(data.blocks);
       document.getElementById('miners-body').innerHTML = renderWorkers(data.workers);
       // Duck-O-Meter grid — only present if there are workers.
