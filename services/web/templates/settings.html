@@ -446,6 +446,7 @@
         </a>
       </h1>
       <span class="grow"></span>
+      <a class="nav" href="{{ url_for('index') }}" title="Back to dashboard">← Dashboard</a>
       <a class="nav" href="{{ url_for('health_page') }}" title="System health">⚕ Health</a>
       <a class="nav current" href="{{ url_for('settings_page') }}" title="Settings" aria-current="page">⚙ Settings</a>
       {% if settings.auth.enabled %}
