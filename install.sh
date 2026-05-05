@@ -367,6 +367,43 @@ fetch_app_files() {
     ok "$count app files in place"
 }
 
+record_install_sha() {
+    # Captures the GitHub commit SHA the install fetched. The dashboard
+    # later compares this against the latest SHA on the branch to tell
+    # the user whether updates are available. Best-effort — if curl
+    # or GitHub's API are unavailable, we record what we know (channel
+    # + timestamp) and the dashboard simply shows "unable to check."
+    step "Recording install version"
+    local meta_dir="$DATA_DIR/shared"
+    local meta_file="$meta_dir/install_meta.json"
+    mkdir -p "$meta_dir"
+
+    local sha=""
+    if [ "$SOURCE_MODE" = "remote" ] && command -v curl >/dev/null 2>&1; then
+        # GitHub API: GET /repos/{owner}/{repo}/commits/{branch}
+        # Returns 60 unauthenticated calls/hr per IP — fine for one
+        # install + occasional dashboard checks.
+        sha=$(curl -fsSL --max-time 8 \
+            "https://api.github.com/repos/ducksdev/ducky-installer/commits/${BRANCH}" 2>/dev/null \
+            | python3 -c "import json,sys; print(json.load(sys.stdin).get('sha',''))" 2>/dev/null \
+            || true)
+    fi
+
+    cat > "$meta_file" <<EOF
+{
+    "branch": "$BRANCH",
+    "sha": "$sha",
+    "installed_at": $(date +%s),
+    "repo": "ducksdev/ducky-installer"
+}
+EOF
+    if [ -n "$sha" ]; then
+        ok "Install SHA recorded: ${sha:0:8} (branch $BRANCH)"
+    else
+        ok "Install metadata recorded (SHA unavailable, update check disabled)"
+    fi
+}
+
 build_and_start() {
     step "Building images (ckpool compile takes a few minutes the first time)"
     cd "$INSTALL_DIR"
@@ -640,6 +677,7 @@ ensure_dependencies
 create_dirs
 generate_secrets
 fetch_app_files
+record_install_sha
 write_compose
 render_ckpool_config
 build_and_start

@@ -3065,6 +3065,97 @@ def api_health():
     return jsonify(health_payload())
 
 
+@app.route("/api/check-updates", methods=["POST"])
+@login_required_json
+def api_check_updates():
+    """Compare the install-time commit SHA against the current head of
+    the same branch on GitHub. Returns a JSON dict the dashboard renders
+    inline. All failure paths return 200 with ok=False + an error
+    string — never raise — because this is a best-effort feature.
+    """
+    meta_path = os.path.join(STATE_DIR, "install_meta.json")
+    if not os.path.exists(meta_path):
+        return jsonify({
+            "ok": False,
+            "error": "install metadata missing — re-run install.sh to enable update checks",
+        })
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+    except (OSError, ValueError) as exc:
+        return jsonify({"ok": False, "error": f"could not read install metadata: {exc}"})
+
+    installed_sha = (meta.get("sha") or "").strip()
+    branch = (meta.get("branch") or "main").strip()
+    repo = (meta.get("repo") or "ducksdev/ducky-installer").strip()
+    if not installed_sha:
+        return jsonify({
+            "ok": False,
+            "error": "install SHA not recorded — re-run install.sh on a network with GitHub access",
+            "branch": branch,
+        })
+
+    # Hit GitHub's commits API. Unauthenticated, 60/hr per IP — enough.
+    api_url = f"https://api.github.com/repos/{repo}/commits/{branch}"
+    try:
+        resp = requests.get(api_url, timeout=8, headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "ducky-pool-update-check",
+        })
+        resp.raise_for_status()
+        data = resp.json()
+    except requests.HTTPError as exc:
+        return jsonify({
+            "ok": False,
+            "error": f"GitHub API error: {exc.response.status_code} {exc.response.reason}",
+            "branch": branch,
+        })
+    except (requests.RequestException, ValueError) as exc:
+        return jsonify({"ok": False, "error": f"network error: {exc}", "branch": branch})
+
+    latest_sha = (data.get("sha") or "").strip()
+    if not latest_sha:
+        return jsonify({
+            "ok": False,
+            "error": "GitHub response missing SHA",
+            "branch": branch,
+        })
+
+    up_to_date = installed_sha == latest_sha
+
+    # Count commits behind. /compare endpoint gives total_commits.
+    # Skip the call if up_to_date — saves a request and a rate slot.
+    behind = 0
+    if not up_to_date:
+        compare_url = f"https://api.github.com/repos/{repo}/compare/{installed_sha}...{latest_sha}"
+        try:
+            r2 = requests.get(compare_url, timeout=8, headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "ducky-pool-update-check",
+            })
+            if r2.ok:
+                behind = int(r2.json().get("total_commits", 0) or 0)
+        except (requests.RequestException, ValueError):
+            # Non-fatal — we can still tell the user there's an update.
+            behind = 0
+
+    return jsonify({
+        "ok": True,
+        "up_to_date": up_to_date,
+        "installed_sha": installed_sha[:8],
+        "latest_sha": latest_sha[:8],
+        "installed_sha_full": installed_sha,
+        "latest_sha_full": latest_sha,
+        "branch": branch,
+        "repo": repo,
+        "behind": behind,
+        "compare_url": (
+            f"https://github.com/{repo}/compare/{installed_sha[:12]}...{latest_sha[:12]}"
+            if not up_to_date else None
+        ),
+    })
+
+
 @app.route("/api/logs/<service>", methods=["GET"])
 @login_required_json
 def api_logs(service: str):
