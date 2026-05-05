@@ -6,6 +6,36 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><circle cx='32' cy='32' r='32' fill='%230c0e13'/><ellipse cx='38' cy='42' rx='20' ry='14' fill='%23f9a825'/><circle cx='22' cy='26' r='11' fill='%23f9a825'/><path d='M 6 26 L 14 22 L 14 30 Z' fill='%23ff6f00'/><circle cx='20' cy='24' r='1.6' fill='%230c0e13'/></svg>">
   <link rel="apple-touch-icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%230c0e13'/><ellipse cx='38' cy='42' rx='20' ry='14' fill='%23f9a825'/><circle cx='22' cy='26' r='11' fill='%23f9a825'/><path d='M 6 26 L 14 22 L 14 30 Z' fill='%23ff6f00'/><circle cx='20' cy='24' r='1.6' fill='%230c0e13'/></svg>">
+  <!-- Theme bootstrap. See index.html for the full comment. -->
+  <script>
+  (function applyTheme() {
+    try {
+      var LS = 'ducky-theme:';
+      var mode = localStorage.getItem(LS + 'mode') || 'dark';
+      if (mode === 'auto') {
+        var prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+        mode = prefersLight ? 'light' : 'dark';
+      }
+      if (mode === 'light' || mode === 'contrast') {
+        document.documentElement.setAttribute('data-theme', mode);
+      }
+      var size = localStorage.getItem(LS + 'size');
+      if (size && size !== 'normal') document.documentElement.setAttribute('data-text-size', size);
+      var font = localStorage.getItem(LS + 'font');
+      if (font && font !== 'system') document.documentElement.setAttribute('data-font', font);
+      var accent = localStorage.getItem(LS + 'accent');
+      if (accent && /^#?[0-9a-f]{6}$/i.test(accent)) {
+        var clean = accent.replace(/^#/, '');
+        document.documentElement.style.setProperty('--accent', '#' + clean);
+        var r = parseInt(clean.slice(0, 2), 16);
+        var g = parseInt(clean.slice(2, 4), 16);
+        var b = parseInt(clean.slice(4, 6), 16);
+        var dim = function(c) { return Math.max(0, Math.floor(c * 0.75)).toString(16).padStart(2, '0'); };
+        document.documentElement.style.setProperty('--accent-deep', '#' + dim(r) + dim(g) + dim(b));
+      }
+    } catch (e) { }
+  })();
+  </script>
   <style>
     :root {
       --bg: #0c0e13;
@@ -20,11 +50,48 @@
       --success: #4cd964;
       --warn: #ffaa00;
       --error: #ff6b6b;
+      --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      --base-size: 16px;
     }
+    :root[data-theme="light"] {
+      --bg: #f4f5f8;
+      --bg-alpha: rgba(244, 245, 248, 0.94);
+      --panel: #ffffff;
+      --panel-soft: #f8f9fb;
+      --border: #d8dde5;
+      --fg: #1a1d24;
+      --muted: #5a6478;
+      --accent-deep: #b06600;
+      --success: #1a8838;
+      --warn: #b07700;
+      --error: #c63030;
+    }
+    :root[data-theme="contrast"] {
+      --bg: #000000;
+      --bg-alpha: rgba(0, 0, 0, 0.95);
+      --panel: #0a0a0a;
+      --panel-soft: #050505;
+      --border: #555555;
+      --fg: #ffffff;
+      --muted: #c0c0c0;
+      --accent: #ffd700;
+      --accent-deep: #ccaa00;
+      --success: #00ff66;
+      --warn: #ffcc00;
+      --error: #ff4444;
+    }
+    :root[data-text-size="small"]  { --base-size: 14px; }
+    :root[data-text-size="normal"] { --base-size: 16px; }
+    :root[data-text-size="large"]  { --base-size: 18px; }
+    :root[data-text-size="xlarge"] { --base-size: 20px; }
+    :root[data-font="serif"]    { --font-stack: Georgia, "Times New Roman", Cambria, serif; }
+    :root[data-font="mono"]     { --font-stack: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+    :root[data-font="dyslexic"] { --font-stack: "OpenDyslexic", "Comic Sans MS", system-ui, sans-serif; }
+    html { font-size: var(--base-size); }
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      font-family: var(--font-stack);
       background: var(--bg); color: var(--fg);
       min-height: 100vh;
     }
@@ -515,6 +582,74 @@
         </div>
       </div>
 
+      <!-- Appearance — per-browser theme/font/text-size. Lives outside
+           the form because changes are written to localStorage directly
+           and applied live; nothing to POST. -->
+      <div class="card" data-card="appearance" data-default-collapsed="true">
+        <header class="collapsible">
+          <h2>Appearance
+            <span class="pill" id="appearance-state">Loading…</span>
+          </h2>
+          <span class="chevron">▼</span>
+        </header>
+        <div class="body">
+          <p class="help" style="margin-top: 0;">
+            Per-browser preferences. Saved on this device only — other dashboard
+            users (or you on a different browser) keep their own choices. Applied
+            immediately, no save needed.
+          </p>
+
+          <div class="grid-3" style="margin-top: 0.6rem;">
+            <div class="field">
+              <label for="theme-mode">Mode</label>
+              <select id="theme-mode" class="theme-input">
+                <option value="dark">Dark (default)</option>
+                <option value="light">Light</option>
+                <option value="contrast">High contrast</option>
+                <option value="auto">Auto (follow OS)</option>
+              </select>
+              <div class="field-help">High contrast uses pure black + white + bright yellow accent for readability.</div>
+            </div>
+
+            <div class="field">
+              <label for="theme-size">Text size</label>
+              <select id="theme-size" class="theme-input">
+                <option value="small">Small (14px)</option>
+                <option value="normal">Normal (16px)</option>
+                <option value="large">Large (18px)</option>
+                <option value="xlarge">X-Large (20px)</option>
+              </select>
+              <div class="field-help">Scales every text element proportionally.</div>
+            </div>
+
+            <div class="field">
+              <label for="theme-font">Font</label>
+              <select id="theme-font" class="theme-input">
+                <option value="system">System default</option>
+                <option value="serif">Serif (Georgia)</option>
+                <option value="mono">Monospace</option>
+                <option value="dyslexic">Dyslexia-friendly</option>
+              </select>
+              <div class="field-help">Dyslexic fonts use OpenDyslexic if installed, else Comic Sans MS as a fallback.</div>
+            </div>
+          </div>
+
+          <div class="field" style="margin-top: 0.5rem;">
+            <label for="theme-accent">Accent colour</label>
+            <div class="tier-color-combo" style="max-width: 320px;">
+              <input type="color" id="theme-accent-swatch" class="tier-color-swatch" value="#f9a825" aria-label="Pick accent colour">
+              <input type="text" id="theme-accent" class="theme-input" value="" maxlength="7" placeholder="#f9a825 (default)">
+              <button type="button" class="ghost" id="theme-accent-clear" title="Reset to default amber">Reset</button>
+            </div>
+            <div class="field-help">Picker writes the hex; clear resets to the default amber. Used everywhere the dashboard shows yellow/orange.</div>
+          </div>
+
+          <div class="actions-bar" style="margin-top: 0.75rem;">
+            <button type="button" class="ghost" id="theme-reset-all">Reset all to defaults</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Tier editor — user-defined duck stages -->
       <div class="card" data-card="tiers" data-default-collapsed="true">
         <header class="collapsible">
@@ -674,6 +809,143 @@
   }
   applyCollapseState();
   bindCollapseHandlers();
+
+  // ── Theme controller (Appearance card) ──────────────────────
+  // Live-applies localStorage changes without a page reload. Same
+  // attribute-and-CSS-variable logic as the head bootstrap.
+  (function themeController() {
+    const LS = 'ducky-theme:';
+    const modeEl   = document.getElementById('theme-mode');
+    const sizeEl   = document.getElementById('theme-size');
+    const fontEl   = document.getElementById('theme-font');
+    const accentEl = document.getElementById('theme-accent');
+    const swatchEl = document.getElementById('theme-accent-swatch');
+    const clearEl  = document.getElementById('theme-accent-clear');
+    const resetEl  = document.getElementById('theme-reset-all');
+    const stateEl  = document.getElementById('appearance-state');
+    if (!modeEl) return;
+
+    function applyMode(mode) {
+      // 'auto' resolves at apply time; we set the attr only for concrete
+      // modes so the default-dark :root still wins.
+      let resolved = mode;
+      if (mode === 'auto') {
+        const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+        resolved = prefersLight ? 'light' : 'dark';
+      }
+      if (resolved === 'light' || resolved === 'contrast') {
+        document.documentElement.setAttribute('data-theme', resolved);
+      } else {
+        document.documentElement.removeAttribute('data-theme');
+      }
+    }
+    function applySize(size) {
+      if (size && size !== 'normal') {
+        document.documentElement.setAttribute('data-text-size', size);
+      } else {
+        document.documentElement.removeAttribute('data-text-size');
+      }
+    }
+    function applyFont(font) {
+      if (font && font !== 'system') {
+        document.documentElement.setAttribute('data-font', font);
+      } else {
+        document.documentElement.removeAttribute('data-font');
+      }
+    }
+    function applyAccent(hex) {
+      if (!hex) {
+        document.documentElement.style.removeProperty('--accent');
+        document.documentElement.style.removeProperty('--accent-deep');
+        return;
+      }
+      const clean = hex.replace(/^#/, '');
+      if (!/^[0-9a-f]{6}$/i.test(clean)) return;
+      document.documentElement.style.setProperty('--accent', '#' + clean);
+      const r = parseInt(clean.slice(0, 2), 16);
+      const g = parseInt(clean.slice(2, 4), 16);
+      const b = parseInt(clean.slice(4, 6), 16);
+      const dim = c => Math.max(0, Math.floor(c * 0.75)).toString(16).padStart(2, '0');
+      document.documentElement.style.setProperty('--accent-deep', '#' + dim(r) + dim(g) + dim(b));
+    }
+
+    function flashState(text) {
+      if (!stateEl) return;
+      stateEl.textContent = text;
+      stateEl.classList.add('ok');
+      clearTimeout(flashState._t);
+      flashState._t = setTimeout(() => {
+        stateEl.classList.remove('ok');
+        stateEl.textContent = 'Active';
+      }, 1200);
+    }
+
+    // Initialise dropdowns from stored values
+    modeEl.value   = localStorage.getItem(LS + 'mode')   || 'dark';
+    sizeEl.value   = localStorage.getItem(LS + 'size')   || 'normal';
+    fontEl.value   = localStorage.getItem(LS + 'font')   || 'system';
+    const storedAccent = localStorage.getItem(LS + 'accent') || '';
+    if (storedAccent) {
+      const v = storedAccent.startsWith('#') ? storedAccent : '#' + storedAccent;
+      accentEl.value = v;
+      if (/^#[0-9a-f]{6}$/i.test(v)) swatchEl.value = v;
+    }
+    if (stateEl) stateEl.textContent = 'Active';
+
+    // Bind change handlers
+    modeEl.addEventListener('change', () => {
+      localStorage.setItem(LS + 'mode', modeEl.value);
+      applyMode(modeEl.value);
+      flashState('Saved');
+    });
+    sizeEl.addEventListener('change', () => {
+      localStorage.setItem(LS + 'size', sizeEl.value);
+      applySize(sizeEl.value);
+      flashState('Saved');
+    });
+    fontEl.addEventListener('change', () => {
+      localStorage.setItem(LS + 'font', fontEl.value);
+      applyFont(fontEl.value);
+      flashState('Saved');
+    });
+    // Accent: swatch and text input cross-update
+    swatchEl.addEventListener('input', () => {
+      accentEl.value = swatchEl.value;
+      localStorage.setItem(LS + 'accent', swatchEl.value.replace(/^#/, ''));
+      applyAccent(swatchEl.value);
+      flashState('Saved');
+    });
+    accentEl.addEventListener('input', () => {
+      const v = accentEl.value.trim();
+      const clean = v.replace(/^#/, '');
+      if (/^[0-9a-f]{6}$/i.test(clean)) {
+        swatchEl.value = '#' + clean;
+        localStorage.setItem(LS + 'accent', clean);
+        applyAccent('#' + clean);
+        flashState('Saved');
+      }
+    });
+    clearEl.addEventListener('click', () => {
+      accentEl.value = '';
+      localStorage.removeItem(LS + 'accent');
+      applyAccent(null);
+      flashState('Reset');
+    });
+    resetEl.addEventListener('click', () => {
+      if (!confirm('Reset all appearance preferences on this browser to defaults?')) return;
+      ['mode', 'size', 'font', 'accent'].forEach(k => localStorage.removeItem(LS + k));
+      modeEl.value = 'dark';
+      sizeEl.value = 'normal';
+      fontEl.value = 'system';
+      accentEl.value = '';
+      swatchEl.value = '#f9a825';
+      applyMode('dark');
+      applySize('normal');
+      applyFont('system');
+      applyAccent(null);
+      flashState('Reset');
+    });
+  })();
 
   // ── auth toggle: show/hide password fields based on enable state ──
   (function authFieldToggle() {

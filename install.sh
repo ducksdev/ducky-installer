@@ -30,9 +30,18 @@ WEB_PORT="${WEB_PORT:-4568}"
 P2P_PORT="${P2P_PORT:-8333}"
 BCHN_IMAGE="${BCHN_IMAGE:-zquestz/bitcoin-cash-node:latest}"
 
-# Source files served from your repo. The installer can run standalone
-# (downloads everything) or be invoked from a local checkout.
-REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/ducksdev/ducky-installer/main}"
+# Branch / channel switch. Default is `main` for stable users. Set
+# BRANCH=dev (or another branch name) to fetch in-progress changes
+# during development. Both branches share the same install.sh — the
+# only difference is which branch the manifest pulls from.
+#
+#   Stable (default):  curl … main/install.sh | sudo bash
+#   Dev channel:       curl … dev/install.sh  | sudo BRANCH=dev bash
+#
+# REPO_RAW can be overridden directly for testing against forks or
+# private mirrors; BRANCH is the simpler knob most users will reach for.
+BRANCH="${BRANCH:-main}"
+REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/ducksdev/ducky-installer/${BRANCH}}"
 
 #────────────────────────────── helpers ──────────────────────────────#
 
@@ -618,6 +627,13 @@ require_root
 detect_local_clone
 
 step "Source mode: $SOURCE_MODE"
+if [ "$SOURCE_MODE" = "remote" ]; then
+    if [ "$BRANCH" = "main" ]; then
+        ok "Channel: main (stable)"
+    else
+        c_red "  ⚠ Channel: $BRANCH (dev — may be unstable)"
+    fi
+fi
 
 install_docker
 ensure_dependencies
