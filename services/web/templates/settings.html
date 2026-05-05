@@ -207,13 +207,24 @@
       display: block; font-size: 0.78rem; color: var(--muted);
       margin-bottom: 0.3rem; font-weight: 500;
     }
-    .field input {
+    .field input,
+    .field select {
       width: 100%; padding: 0.5rem 0.75rem;
       background: var(--panel-soft); color: var(--fg);
       border: 1px solid var(--border); border-radius: 8px;
       font-family: ui-monospace, monospace; font-size: 0.86rem;
     }
-    .field input:focus {
+    .field select {
+      font-family: inherit; /* prose dropdown reads better in sans */
+      -webkit-appearance: none; appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%238a92a6' d='M6 8 0 0h12z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 0.7rem center;
+      padding-right: 2rem;
+      cursor: pointer;
+    }
+    .field input:focus,
+    .field select:focus {
       outline: none; border-color: var(--accent);
       box-shadow: 0 0 0 3px rgba(249,168,37,0.18);
     }
@@ -482,6 +493,25 @@
           <span class="chevron">▼</span>
         </header>
         <div class="body">
+          <div class="field" style="margin-bottom: 0.9rem;">
+            <label for="diff-preset">Preset</label>
+            <select id="diff-preset" class="diff-preset-select">
+              <!-- data-min/start/max use the same shorthand the inputs accept.
+                   "Custom" is selected when no preset matches the live values. -->
+              <option value="mixed"     data-min="1"    data-start="16"     data-max="0">Mixed (recommended) — anything goes</option>
+              <option value="micro"     data-min="1"    data-start="16"     data-max="1M">Micro miners (kH/s–MH/s) — USB / FPGA</option>
+              <option value="small"     data-min="1"    data-start="16"     data-max="100M">Small miners (MH/s–GH/s) — Bitaxe / NerdMiner</option>
+              <option value="home"      data-min="1024"  data-start="8192"   data-max="0">Home ASICs (1–20 TH/s) — NerdQAxe / single S9</option>
+              <option value="farm"      data-min="8192"  data-start="65536"  data-max="0">Farm (20–200 TH/s) — multiple ASICs or MRR rental</option>
+              <option value="mega"      data-min="65536" data-start="262144" data-max="0">Mega (200+ TH/s) — large rental</option>
+              <option value="custom"    data-min=""      data-start=""       data-max="">Custom — set values manually below</option>
+            </select>
+            <div class="field-help">
+              Pick a preset that matches your hardware mix. The fields below auto-fill;
+              edit any of them and this dropdown switches to <strong>Custom</strong>.
+              Saving any change still restarts ckpool.
+            </div>
+          </div>
           <div class="grid-3">
             <div class="field">
               <label for="mindiff">Minimum</label>
@@ -981,6 +1011,74 @@
       applyAccent(null);
       flashState('Reset');
     });
+  })();
+
+  // ── Stratum difficulty preset selector ────────────────────────
+  // Picking a preset auto-fills the three diff inputs. Editing any
+  // input switches the dropdown to "Custom". On load, we try to
+  // match the current values against the known presets.
+  (function diffPresetController() {
+    const sel = document.getElementById('diff-preset');
+    const minEl = document.getElementById('mindiff');
+    const startEl = document.getElementById('startdiff');
+    const maxEl = document.getElementById('maxdiff');
+    if (!sel || !minEl || !startEl || !maxEl) return;
+
+    // Normalise shorthand to a canonical raw integer string so user
+    // input ("1k", "1K", "1000") compares equal to preset-shorthand.
+    // Mirrors the server's parse_diff but in a small JS form.
+    function normalise(v) {
+      if (v === undefined || v === null) return '';
+      const s = String(v).trim().replace(/[\s,_]/g, '').toLowerCase();
+      if (s === '' || s === '0') return '0';
+      const m = s.match(/^([0-9]*\.?[0-9]+)\s*([kmgtpe]?)$/);
+      if (!m) return s;  // unparseable; let strict equality handle it
+      const num = parseFloat(m[1]);
+      const mult = { '': 1, k: 1e3, m: 1e6, g: 1e9, t: 1e12, p: 1e15, e: 1e18 }[m[2]] || 1;
+      return String(Math.round(num * mult));
+    }
+
+    function matchPreset() {
+      const cur = {
+        min:   normalise(minEl.value),
+        start: normalise(startEl.value),
+        max:   normalise(maxEl.value),
+      };
+      for (const opt of sel.options) {
+        if (opt.value === 'custom') continue;
+        if (
+          normalise(opt.dataset.min)   === cur.min &&
+          normalise(opt.dataset.start) === cur.start &&
+          normalise(opt.dataset.max)   === cur.max
+        ) {
+          return opt.value;
+        }
+      }
+      return 'custom';
+    }
+
+    function applyPreset() {
+      const opt = sel.selectedOptions[0];
+      if (!opt || opt.value === 'custom') return;
+      // Show shorthand values in the inputs (1K, not 1000) — matches
+      // how mindiff_h etc. render server-side.
+      minEl.value   = opt.dataset.min   || '1';
+      startEl.value = opt.dataset.start || '1';
+      maxEl.value   = opt.dataset.max   || '0';
+    }
+
+    sel.addEventListener('change', applyPreset);
+
+    // Re-detect preset on any input change. 'input' fires per-keystroke
+    // so the dropdown updates live as the user types.
+    [minEl, startEl, maxEl].forEach(el => {
+      el.addEventListener('input', () => {
+        sel.value = matchPreset();
+      });
+    });
+
+    // Initial detection on load.
+    sel.value = matchPreset();
   })();
 
   // ── auth toggle: show/hide password fields based on enable state ──
