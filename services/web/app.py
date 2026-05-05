@@ -1103,6 +1103,7 @@ def get_pool_stats() -> dict:
             "accepted": data.get("accepted", 0),
             "rejected": data.get("rejected", 0),
             "best_share": humanise_diff(data.get("bestshare", 0)),
+            "best_share_raw": float(data.get("bestshare", 0) or 0),
             "diff": data.get("diff", 0),
         }
     except FileNotFoundError:
@@ -2373,7 +2374,7 @@ def _build_stats_payload(public: bool = False) -> dict:
     ever_raw = 0.0
     if pool.get("ok"):
         try:
-            ever_raw = float(pool.get("bestshare", 0) or 0)
+            ever_raw = float(pool.get("best_share_raw", 0) or 0)
         except (TypeError, ValueError):
             ever_raw = 0.0
 
