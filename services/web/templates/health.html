@@ -438,6 +438,11 @@
           <span>Ducky <span class="accent">Pool</span></span>
         </a>
       </h1>
+      {% if license.is_pro %}
+        <span class="pill ok" title="Pro license active" style="margin-left: 0.4rem; font-size: 0.66rem;">Pro</span>
+      {% else %}
+        <a href="{{ url_for('settings_page') }}#license" class="pill" title="Free tier — click to upgrade" style="margin-left: 0.4rem; font-size: 0.66rem; text-decoration: none; cursor: pointer;">Free · Upgrade</a>
+      {% endif %}
       <span class="grow"></span>
       <a class="nav" href="{{ url_for('index') }}" title="Back to dashboard">← Dashboard</a>
       <a class="nav current" href="{{ url_for('health_page') }}" title="System health" aria-current="page">⚕ Health</a>

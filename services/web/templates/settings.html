@@ -489,6 +489,11 @@
           <span>Ducky <span class="accent">Pool</span></span>
         </a>
       </h1>
+      {% if license.is_pro %}
+        <span class="pill ok" title="Pro license active" style="margin-left: 0.4rem; font-size: 0.66rem;">Pro</span>
+      {% else %}
+        <a href="#license" class="pill" title="Free tier — click to upgrade" style="margin-left: 0.4rem; font-size: 0.66rem; text-decoration: none; cursor: pointer;">Free · Upgrade</a>
+      {% endif %}
       <span class="grow"></span>
       <a class="nav" href="{{ url_for('index') }}" title="Back to dashboard">← Dashboard</a>
       <a class="nav" href="{{ url_for('health_page') }}" title="System health">⚕ Health</a>
@@ -515,6 +520,82 @@
       Saving any change to <strong>Stratum difficulty</strong> restarts ckpool.
       Connected miners drop and reconnect within a few seconds; no shares are lost.
       Discord changes don't affect ckpool.
+    </div>
+
+    <!-- ── License card (own form — not part of main settings) ── -->
+    <div class="card" data-card="license" id="license"
+         data-default-collapsed="{{ 'true' if license.is_pro else 'false' }}">
+      <header class="collapsible">
+        <h2>
+          License
+          {% if license.is_pro %}
+            <span class="pill ok" style="margin-left: 0.5rem;">Pro</span>
+          {% else %}
+            <span class="pill" style="margin-left: 0.5rem; opacity: 0.7;">Free</span>
+          {% endif %}
+        </h2>
+        <span class="chevron">▼</span>
+      </header>
+      <div class="body">
+        {% if license.is_pro %}
+          <p class="help" style="margin-top: 0;">
+            Pro license active. Thanks for supporting Ducky Pool 🦆
+          </p>
+          <div class="grid-3" style="grid-template-columns: 1fr 1fr; max-width: 520px;">
+            <div class="field" style="margin-bottom: 0;">
+              <label>Email</label>
+              <div class="mono" style="padding: 0.5rem 0.75rem; background: var(--panel-soft); border: 1px solid var(--border); border-radius: 8px; font-size: 0.85rem; word-break: break-all;">{{ license.email }}</div>
+            </div>
+            <div class="field" style="margin-bottom: 0;">
+              <label>Tier</label>
+              <div class="mono" style="padding: 0.5rem 0.75rem; background: var(--panel-soft); border: 1px solid var(--border); border-radius: 8px; font-size: 0.85rem;">{{ license.tier }}</div>
+            </div>
+          </div>
+          <form method="post" action="{{ url_for('license_clear') }}" style="margin-top: 0.85rem;" onsubmit="return confirm('Remove this license and revert to Free tier? Your customizations stay, but Discord webhooks stop firing and Miners table caps at {{ free_tier_max_miners }}.');">
+            <button type="submit" class="ghost">Remove license</button>
+          </form>
+        {% else %}
+          {% if license.has_token %}
+            <div class="note" style="margin-top: 0;">
+              <span class="label">Invalid</span>
+              The current license key didn't validate. Either it's been mistyped, the
+              dashboard was upgraded with a rotated secret, or the key was issued for a
+              different install. Paste a fresh key or remove it.
+            </div>
+          {% endif %}
+
+          <p class="help" style="margin-top: 0;">
+            <strong>Free tier active.</strong> You can mine up to {{ free_tier_max_miners }} workers.
+            Pro adds: unlimited miners, Discord webhooks, theme customization,
+            block found celebration overlay, and future Pro features.
+          </p>
+          <p class="help" style="margin-top: 0.4rem;">
+            Get a license: <strong>£35 one-time</strong> at
+            <a href="{{ purchase_url }}" target="_blank" rel="noopener">{{ purchase_url }}</a>.
+            After purchase, paste the key you received below.
+          </p>
+
+          <form method="post" action="{{ url_for('license_save') }}" style="margin-top: 0.85rem;">
+            <div class="field" style="margin-bottom: 0.5rem;">
+              <label for="license_token">License key</label>
+              <input id="license_token" name="token" type="text"
+                     placeholder="Paste your license key here…"
+                     style="font-family: ui-monospace, monospace; font-size: 0.78rem;">
+              <div class="field-help">
+                Looks like <span class="mono">aGVsbG9...</span>.<span class="mono">f9a3...</span> — case-sensitive,
+                copy it whole including the dot in the middle.
+              </div>
+            </div>
+            <div class="actions-bar" style="margin-top: 0.85rem;">
+              <button type="submit">Activate Pro</button>
+              <a href="{{ purchase_url }}" target="_blank" rel="noopener" class="ghost"
+                 style="text-decoration: none; padding: 0.5rem 1.1rem; border: 1px solid var(--border); border-radius: 8px; color: var(--fg); font-size: 0.86rem;">
+                Buy a license ↗
+              </a>
+            </div>
+          </form>
+        {% endif %}
+      </div>
     </div>
 
     <form method="post" action="{{ url_for('settings_save') }}" autocomplete="off">
@@ -638,12 +719,21 @@
       <div class="card" data-card="discord" data-default-collapsed="true">
         <header class="collapsible">
           <h2>Discord webhook
-            {% if settings.discord.webhook_url %}<span class="pill ok">Configured</span>
+            {% if not license.is_pro %}<span class="pill" style="background: rgba(249, 168, 37, 0.15); color: var(--accent);">Pro</span>
+            {% elif settings.discord.webhook_url %}<span class="pill ok">Configured</span>
             {% else %}<span class="pill dim">Off</span>{% endif %}
           </h2>
           <span class="chevron">▼</span>
         </header>
         <div class="body">
+          {% if not license.is_pro %}
+          <div class="note" style="margin-top: 0; border-color: var(--accent);">
+            <span class="label" style="color: var(--accent);">Pro</span>
+            Discord webhooks are a Pro feature. You can edit the URL below and it'll be saved,
+            but webhooks won't fire until you
+            <a href="#license">activate a Pro license</a>.
+          </div>
+          {% endif %}
           <div class="field">
             <label for="webhook_url">Webhook URL</label>
             <input id="webhook_url" name="webhook_url" type="url"

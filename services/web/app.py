@@ -14,6 +14,9 @@ Endpoints:
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
 import logging
 import logging.handlers
@@ -54,13 +57,19 @@ GITHUB_URL = os.environ.get("GITHUB_URL", "https://github.com/ducksdev/ducky-ins
 def _inject_footer_globals():
     """Make footer values available to every template without each
     route having to pass them. Uptime is computed per-request so the
-    footer ticks up live on each page load."""
+    footer ticks up live on each page load. License status is also
+    injected here so header pills + feature gates work uniformly across
+    all pages.
+    """
     uptime_s = max(0, int(time.time()) - APP_STARTED_AT)
     return {
         "footer_uptime_s": uptime_s,
         "footer_uptime_human": humanise_duration(uptime_s),
         "footer_version": APP_VERSION,
         "footer_github": GITHUB_URL,
+        "license": license_status(),
+        "purchase_url": PURCHASE_URL,
+        "free_tier_max_miners": FREE_TIER_MAX_MINERS,
     }
 
 
@@ -120,6 +129,30 @@ SETTINGS_FILE = os.path.join(STATE_DIR, "settings.json")
 BASELINE_FILE = os.path.join(STATE_DIR, "best_baselines.json")
 SEEN_BLOCKS_FILE = os.path.join(STATE_DIR, "seen_blocks.json")
 HISTORY_DB = os.path.join(STATE_DIR, "history.db")
+
+# License system
+# Tokens are signed by the developer (you) using DUCKY_LICENSE_SECRET as the
+# HMAC key. Each token contains an email + tier + issue timestamp. Tokens
+# are portable text — users paste them into Settings → License. Verification
+# is purely local (no network, no phone-home, no tracking).
+#
+# To issue a new token, run the standalone scripts/issue_license.py with the
+# secret set in env. To revoke all existing tokens (e.g. if a leak happens),
+# rotate the secret in a future release; old tokens stop verifying.
+#
+# If DUCKY_LICENSE_SECRET is unset, the system fails CLOSED (free tier) but
+# the dashboard still works — we never block the user from running their
+# pool, just from accessing Pro features.
+LICENSE_SECRET = os.environ.get("DUCKY_LICENSE_SECRET", "").encode("utf-8")
+LICENSE_TIER_FREE = "free"
+LICENSE_TIER_PRO = "pro"
+# Free tier hard limits. Tweak these once and they propagate everywhere via
+# the helpers below — don't sprinkle magic numbers across the code base.
+FREE_TIER_MAX_MINERS = 3
+PURCHASE_URL = os.environ.get(
+    "DUCKY_PURCHASE_URL",
+    "https://ducksdev.gumroad.com/l/ducky-pool-pro",  # placeholder — update when live
+)
 # When this file appears, ckpool's entrypoint stops ckpool, removes the
 # marker, and starts ckpool fresh on the next loop iteration. We use this
 # to clear ckpool's in-memory bestshare cache on "Wipe all stats".
@@ -177,6 +210,12 @@ DEFAULT_SETTINGS = {
     "auth": {
         "enabled": False,
         "password_hash": "",
+    },
+    # License token for Pro features. Empty = free tier with hard limits
+    # (3 miners visible, no Discord webhook, etc). Token is opaque to the
+    # server; verification is done in license_status().
+    "license": {
+        "token": "",
     },
 }
 
@@ -483,7 +522,7 @@ def _normalise_tiers(raw) -> list:
 
 def _merge_defaults(loaded: dict) -> dict:
     out = dict(DEFAULT_SETTINGS)
-    out.update({k: v for k, v in loaded.items() if k not in ("discord", "auth", "tiers")})
+    out.update({k: v for k, v in loaded.items() if k not in ("discord", "auth", "tiers", "license")})
     discord = dict(DEFAULT_SETTINGS["discord"])
     discord.update(loaded.get("discord") or {})
     out["discord"] = discord
@@ -495,6 +534,9 @@ def _merge_defaults(loaded: dict) -> dict:
     if not auth.get("password_hash"):
         auth["enabled"] = False
     out["auth"] = auth
+    license_dict = dict(DEFAULT_SETTINGS["license"])
+    license_dict.update(loaded.get("license") or {})
+    out["license"] = license_dict
     out["tiers"] = _normalise_tiers(loaded.get("tiers"))
     return out
 
@@ -571,6 +613,98 @@ def check_password(plaintext: str) -> bool:
         return bcrypt.checkpw(plaintext.encode("utf-8"), stored.encode("utf-8"))
     except (ValueError, TypeError):
         return False
+
+
+def issue_license_token(email: str, tier: str = LICENSE_TIER_PRO) -> str:
+    """Issue a signed license token. Used by the standalone issue_license
+    script. Format: base64(email|tier|issued_ts)|hex(hmac). Anyone with
+    the secret can issue; only the secret holder can verify. Email is
+    visible to anyone with the token — that's fine, it's their email.
+    """
+    if not LICENSE_SECRET:
+        raise RuntimeError("DUCKY_LICENSE_SECRET not set — cannot issue license tokens")
+    if not email or "@" not in email:
+        raise ValueError("Email required")
+    if tier not in (LICENSE_TIER_PRO,):
+        raise ValueError(f"Unsupported tier: {tier}")
+    payload = f"{email.strip().lower()}|{tier}|{int(time.time())}"
+    payload_b64 = base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii").rstrip("=")
+    sig = hmac.new(LICENSE_SECRET, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"{payload_b64}.{sig}"
+
+
+def parse_license_token(token: str) -> dict | None:
+    """Verify and decode a license token. Returns dict with email, tier,
+    issued_at on success; None on any failure. Pure local operation — no
+    network calls, no logging of the token itself.
+
+    Failure modes:
+      - Empty/malformed token -> None
+      - HMAC mismatch (forged or wrong secret) -> None
+      - DUCKY_LICENSE_SECRET not configured -> None (free tier)
+    """
+    if not LICENSE_SECRET or not token:
+        return None
+    token = token.strip()
+    if "." not in token:
+        return None
+    payload_b64, sig = token.rsplit(".", 1)
+    try:
+        # Add padding back for base64 decode
+        padded = payload_b64 + "=" * (-len(payload_b64) % 4)
+        payload = base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return None
+    expected_sig = hmac.new(LICENSE_SECRET, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected_sig, sig.lower()):
+        return None
+    parts = payload.split("|")
+    if len(parts) != 3:
+        return None
+    email, tier, issued_at_str = parts
+    try:
+        issued_at = int(issued_at_str)
+    except ValueError:
+        return None
+    if tier not in (LICENSE_TIER_PRO,):
+        return None
+    return {"email": email, "tier": tier, "issued_at": issued_at}
+
+
+def license_status() -> dict:
+    """Inspect the currently-stored license token from settings and
+    return a structured status used by templates and feature gates.
+
+    Always returns a dict — never None — so callers can use it without
+    null checks. The 'is_pro' boolean is the canonical feature gate.
+    """
+    s = load_settings()
+    raw = (s.get("license") or {}).get("token", "").strip()
+    parsed = parse_license_token(raw) if raw else None
+    if parsed:
+        return {
+            "is_pro": True,
+            "tier": parsed["tier"],
+            "email": parsed["email"],
+            "issued_at": parsed["issued_at"],
+            "valid": True,
+            "has_token": True,
+        }
+    return {
+        "is_pro": False,
+        "tier": LICENSE_TIER_FREE,
+        "email": "",
+        "issued_at": 0,
+        "valid": False,
+        # has_token=True means user pasted SOMETHING but it didn't verify
+        # — useful to render "Invalid license key" instead of "no key".
+        "has_token": bool(raw),
+    }
+
+
+def is_pro() -> bool:
+    """Shorthand for feature gates."""
+    return license_status()["is_pro"]
 
 
 def auth_enabled() -> bool:
@@ -1674,6 +1808,12 @@ def duck_stage(sdiff: float, net_diff: float | None = None) -> dict:
 
 
 def _post_discord(content: str | None, embeds: list[dict] | None = None) -> tuple[bool, str]:
+    # Pro-tier gate. Free installs may have a webhook URL configured (we
+    # don't wipe it on tier change), but webhooks won't fire until they
+    # upgrade. Check tier BEFORE loading settings/url so the early-return
+    # is cheap on the hot path (best-share watcher hits this every minute).
+    if not is_pro():
+        return False, "Pro required for Discord webhooks."
     s = load_settings()
     url = s["discord"]["webhook_url"]
     if not url:
@@ -2459,6 +2599,27 @@ def _build_stats_payload(public: bool = False) -> dict:
         "net_diff": net_diff,
         "net_diff_human": humanise_diff(net_diff) if net_diff else "—",
     }
+
+    # Free-tier worker cap. Apply LAST so all internal calculations
+    # (best share, webhook firing, block detection) see the full list.
+    # Only the dashboard UI gets the truncated list. Sort by hashrate
+    # so the user sees their biggest miners at the cap.
+    full_count = len(workers)
+    if not is_pro() and full_count > FREE_TIER_MAX_MINERS:
+        sorted_workers = sorted(
+            workers,
+            key=lambda w: _hashrate_str_to_float(w.get("hashrate_1m") or "0H/s") or 0,
+            reverse=True,
+        )
+        payload["workers"] = sorted_workers[:FREE_TIER_MAX_MINERS]
+        payload["workers_truncated"] = True
+        payload["workers_total"] = full_count
+        payload["workers_visible"] = FREE_TIER_MAX_MINERS
+    else:
+        payload["workers_truncated"] = False
+        payload["workers_total"] = full_count
+        payload["workers_visible"] = full_count
+
     if not public:
         s = load_settings()
         payload["payout"] = read_payout()
@@ -2521,6 +2682,9 @@ def index():
         status=payload["node"],
         pool=payload["pool"],
         workers=payload["workers"],
+        workers_truncated=payload.get("workers_truncated", False),
+        workers_total=payload.get("workers_total", 0),
+        workers_visible=payload.get("workers_visible", 0),
         blocks=payload["blocks"],
         eta=payload["eta"],
         net_diff_human=payload["net_diff_human"],
@@ -2545,6 +2709,9 @@ def public_view():
         status=payload["node"],
         pool=payload["pool"],
         workers=payload["workers"],
+        workers_truncated=payload.get("workers_truncated", False),
+        workers_total=payload.get("workers_total", 0),
+        workers_visible=payload.get("workers_visible", 0),
         blocks=payload["blocks"],
         eta=payload["eta"],
         net_diff_human=payload["net_diff_human"],
@@ -3030,6 +3197,50 @@ def settings_save():
     else:
         flash("Settings saved.", "ok")
     return redirect(url_for("settings_page"))
+
+
+@app.route("/license/save", methods=["POST"])
+@login_required
+def license_save():
+    """Validate and store a license token. Refuses to save invalid
+    tokens — that way the user sees the error immediately rather than
+    discovering it via "Pro features still locked"."""
+    token = (request.form.get("token") or "").strip()
+    if not token:
+        flash("Paste a license key into the field first.", "error")
+        return redirect(url_for("settings_page") + "#license")
+
+    parsed = parse_license_token(token)
+    if not parsed:
+        flash(
+            "Invalid license key. Check you copied the full key including "
+            "the dot in the middle. If the key was issued before a recent "
+            "update, you may need a refreshed key — email support.",
+            "error",
+        )
+        return redirect(url_for("settings_page") + "#license")
+
+    s = load_settings()
+    s["license"] = {"token": token}
+    save_settings(s)
+    flash(
+        f"Pro license activated for {parsed['email']}. Thanks for supporting Ducky Pool 🦆",
+        "ok",
+    )
+    return redirect(url_for("settings_page") + "#license")
+
+
+@app.route("/license/clear", methods=["POST"])
+@login_required
+def license_clear():
+    """Remove the stored license token. Reverts the install to the free
+    tier — useful for moving a license to another machine, or for testing.
+    """
+    s = load_settings()
+    s["license"] = {"token": ""}
+    save_settings(s)
+    flash("License removed. Free tier active.", "ok")
+    return redirect(url_for("settings_page") + "#license")
 
 
 @app.route("/webhook/test", methods=["POST"])

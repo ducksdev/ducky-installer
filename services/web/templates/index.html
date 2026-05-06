@@ -745,6 +745,11 @@
         </a>
       </h1>
       <span id="live-indicator" class="live-dot" title="Live — updates every 10s"></span>
+      {% if license.is_pro %}
+        <span class="pill ok" title="Pro license active" style="margin-left: 0.4rem; font-size: 0.66rem;">Pro</span>
+      {% elif not public %}
+        <a href="{{ url_for('settings_page') }}#license" class="pill" title="Free tier — click to upgrade" style="margin-left: 0.4rem; font-size: 0.66rem; text-decoration: none; cursor: pointer;">Free · Upgrade</a>
+      {% endif %}
       <span class="grow"></span>
       {% if not public %}
         <a class="nav" href="{{ url_for('public_view') }}" title="Public read-only view">View as public</a>
@@ -881,10 +886,21 @@
         <!-- Miners -->
         <div class="card" data-card="miners">
           <header class="collapsible">
-            <h2>Miners</h2>
+            <h2>Miners
+              {% if workers_truncated %}
+                <span class="pill" style="background: rgba(249, 168, 37, 0.15); color: var(--accent); margin-left: 0.4rem;">{{ workers_visible }} of {{ workers_total }}</span>
+              {% endif %}
+            </h2>
             <span class="chevron">▼</span>
           </header>
           <div class="body">
+            {% if workers_truncated %}
+            <div class="note" id="miners-truncation-note" style="margin-top: 0; margin-bottom: 0.85rem; border-color: var(--accent);">
+              <span class="label" style="color: var(--accent);">Free tier</span>
+              Showing top {{ workers_visible }} workers by hashrate. You have {{ workers_total }} connected.
+              <a href="{{ url_for('settings_page') }}#license">Upgrade to Pro</a> to see all of them.
+            </div>
+            {% endif %}
             <div id="miners-body">
               <!-- server-side initial render -->
               {% if workers %}
@@ -1358,6 +1374,52 @@
     }).join('');
   }
 
+  // Banner shown above the Miners table when the free-tier worker
+  // cap is in effect. Re-renders on every poll so connecting/
+  // disconnecting workers trips the banner immediately.
+  function updateMinersTruncation(data) {
+    const card = document.querySelector('[data-card="miners"]');
+    if (!card) return;
+    const body = card.querySelector('.body');
+    if (!body) return;
+    const headerH2 = card.querySelector('header h2');
+    const truncated = !!data.workers_truncated;
+    const total = data.workers_total || 0;
+    const visible = data.workers_visible || 0;
+
+    // Header count pill
+    let pill = headerH2 ? headerH2.querySelector('.miners-count-pill') : null;
+    if (truncated) {
+      if (!pill && headerH2) {
+        pill = document.createElement('span');
+        pill.className = 'pill miners-count-pill';
+        pill.style.cssText = 'background: rgba(249, 168, 37, 0.15); color: var(--accent); margin-left: 0.4rem;';
+        headerH2.appendChild(pill);
+      }
+      if (pill) pill.textContent = `${visible} of ${total}`;
+    } else if (pill) {
+      pill.remove();
+    }
+
+    // Body banner
+    let banner = document.getElementById('miners-truncation-note');
+    if (truncated) {
+      if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'miners-truncation-note';
+        banner.className = 'note';
+        banner.style.cssText = 'margin-top: 0; margin-bottom: 0.85rem; border-color: var(--accent);';
+        body.insertBefore(banner, body.firstChild);
+      }
+      banner.innerHTML =
+        '<span class="label" style="color: var(--accent);">Free tier</span>' +
+        ` Showing top ${visible} workers by hashrate. You have ${total} connected. ` +
+        `<a href="/settings#license">Upgrade to Pro</a> to see all of them.`;
+    } else if (banner) {
+      banner.remove();
+    }
+  }
+
   function renderWorkers(workers) {
     if (!workers.length) {
       return '<p class="miners-empty">No miners connected yet. Point one at the stratum URL.</p>';
@@ -1634,6 +1696,7 @@
       document.getElementById('blocks-body').innerHTML = renderBlocks(data.blocks);
       checkBlockOverlay(data.blocks);
       document.getElementById('miners-body').innerHTML = renderWorkers(data.workers);
+      updateMinersTruncation(data);
       // Duck-O-Meter grid — only present if there are workers.
       const duckBody = document.getElementById('duck-o-meters-body');
       if (duckBody) {
