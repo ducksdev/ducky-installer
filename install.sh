@@ -41,7 +41,7 @@ BCHN_IMAGE="${BCHN_IMAGE:-zquestz/bitcoin-cash-node:latest}"
 # honor-system license model: HMAC just prevents trivial forging,
 # enforcement is legal/contractual not cryptographic. Anyone running
 # their own fork should generate their own secret and update this line.
-DUCKY_LICENSE_SECRET="${DUCKY_LICENSE_SECRET:-CHANGEME-set-me-before-publishing-with-python3-c-secrets}"
+DUCKY_LICENSE_SECRET="${DUCKY_LICENSE_SECRET:-5qF0t1JP-9QtvSsx0vH6r5EyZam0FavZXm6zaHI7hv0}"
 DUCKY_PURCHASE_URL="${DUCKY_PURCHASE_URL:-https://ducksdev.gumroad.com/l/ducky-pool-pro}"
 APP_VERSION="${APP_VERSION:-1.0}"
 GITHUB_URL_DEFAULT="${GITHUB_URL:-https://github.com/ducksdev/ducky-installer}"
