@@ -693,19 +693,21 @@
 
     /* Locked rows: ghosted entries showing what's hidden behind paywall */
     .miners tr.locked td {
-      opacity: 0.45;
+      opacity: 0.55;
       color: var(--muted) !important;
       pointer-events: none;
       user-select: none;
-    }
-    .miners tr.locked .worker-name {
-      filter: blur(3px);
     }
     .miners tr.locked .lock-cell {
       filter: none; opacity: 1; pointer-events: auto;
       text-align: right;
     }
-    .miners tr.locked td:not(.lock-cell) .lock-icon {
+    .miners tr.locked.rejected td:first-child {
+      /* Real worker names — readable, not blurred. The lock icon + pill
+         communicate the rejected state without obscuring the name. */
+      opacity: 0.7;
+    }
+    .miners tr.locked .lock-icon {
       display: inline-block;
       margin-right: 0.4rem;
       filter: none;
@@ -722,17 +724,17 @@
       font-size: 0.74rem;
       pointer-events: auto;
       filter: none;
+      opacity: 1;
     }
     .miners tr.locked .lock-cta:hover { opacity: 0.9; }
+    /* The "Rejected" pill itself stays visible against the dimmed row */
+    .miners tr.locked .pill { opacity: 1; filter: none; }
     /* Mobile card variant of locked entries */
     .miner-card.locked {
-      opacity: 0.6;
+      opacity: 0.7;
       position: relative;
       background: var(--panel-soft);
       border-style: dashed;
-    }
-    .miner-card.locked .name {
-      filter: blur(3px); user-select: none;
     }
     .miner-card.locked .lock-overlay {
       display: flex; align-items: center; justify-content: space-between;
@@ -1101,14 +1103,14 @@
           </header>
           <div class="body">
             {% if workers_truncated %}
-            {% set hidden_count = workers_total - workers_visible %}
+            {% set rejected_count = rejected_workers|length %}
             <div class="free-limit-banner" id="miners-truncation-note">
               <span class="flb-icon" aria-hidden="true">🔒</span>
               <div class="flb-text">
                 <strong>Free tier limit reached.</strong>
-                Showing top {{ workers_visible }} of {{ workers_total }} workers.
-                {{ hidden_count }} worker{{ 's' if hidden_count != 1 else '' }} hidden.
-                <div class="flb-sub">Upgrade to Pro to see all your miners, get Discord webhooks, and unlock customization.</div>
+                {{ workers_visible }} of {{ worker_cap }} miner slots in use.
+                {{ rejected_count }} additional miner{{ 's' if rejected_count != 1 else '' }} being rejected from the pool.
+                <div class="flb-sub">Upgrade to Pro to allow all your miners to mine, get Discord webhooks, and personalize block signatures.</div>
               </div>
               <a href="{{ url_for('settings_page') }}#license" class="flb-cta">Upgrade to Pro · £35</a>
             </div>
@@ -1155,17 +1157,16 @@
                         {% endif %}
                       </tr>
                     {% endfor %}
-                    {% if workers_truncated %}
-                      {% set hidden_count = workers_total - workers_visible %}
-                      {% for _ in range(hidden_count) %}
-                        <tr class="locked">
+                    {% if rejected_workers %}
+                      {% for w in rejected_workers %}
+                        <tr class="locked rejected">
                           <td class="worker-name">
-                            <span class="lock-icon" aria-hidden="true">🔒</span>worker-hidden-{{ loop.index }}
+                            <span class="lock-icon" aria-hidden="true">🔒</span>{{ w.name }}
                           </td>
-                          <td>—</td>
-                          <td class="num">— TH/s</td>
-                          <td class="num">—</td>
-                          <td class="num">—</td>
+                          <td><span class="pill err">Rejected</span></td>
+                          <td class="num">{{ w.hashrate_1m }}</td>
+                          <td class="num">{{ w.best_share }}</td>
+                          <td class="num">{{ w.age_human }}</td>
                           {% if not public %}
                           <td class="lock-cell">
                             {% if loop.first %}
@@ -1210,22 +1211,22 @@
                       </div>
                     </div>
                   {% endfor %}
-                  {% if workers_truncated %}
-                    {% set hidden_count = workers_total - workers_visible %}
-                    {% for i in range(hidden_count) %}
-                      <div class="miner-card locked">
+                  {% if rejected_workers %}
+                    {% set rejected_count = rejected_workers|length %}
+                    {% for w in rejected_workers %}
+                      <div class="miner-card locked rejected">
                         <div class="name-row">
-                          <span class="name">🔒 worker-hidden-{{ loop.index }}</span>
-                          <span class="pill dim">Locked</span>
+                          <span class="name">🔒 {{ w.name }}</span>
+                          <span class="pill err">Rejected</span>
                         </div>
                         <div class="stats-row">
-                          <div>Hashrate<br><span class="v">— TH/s</span></div>
-                          <div>Best<br><span class="v">—</span></div>
-                          <div>Seen<br><span class="v">—</span></div>
+                          <div>Hashrate<br><span class="v">{{ w.hashrate_1m }}</span></div>
+                          <div>Best<br><span class="v">{{ w.best_share }}</span></div>
+                          <div>Seen<br><span class="v">{{ w.age_human }}</span></div>
                         </div>
                         {% if loop.first %}
                           <div class="lock-overlay">
-                            <span style="font-size: 0.78rem; color: var(--muted);">{{ hidden_count }} more worker{{ 's' if hidden_count != 1 else '' }} hidden</span>
+                            <span style="font-size: 0.78rem; color: var(--muted);">{{ rejected_count }} miner{{ 's' if rejected_count != 1 else '' }} being rejected</span>
                             <a href="{{ url_for('settings_page') }}#license" class="lock-cta">Unlock all ↗</a>
                           </div>
                         {% endif %}
@@ -1681,14 +1682,15 @@
         banner.className = 'free-limit-banner';
         body.insertBefore(banner, body.firstChild);
       }
-      const plural = hidden === 1 ? '' : 's';
+      const rejectedCount = (data.rejected_workers || []).length;
+      const plural = rejectedCount === 1 ? '' : 's';
       banner.innerHTML =
         '<span class="flb-icon" aria-hidden="true">🔒</span>' +
         '<div class="flb-text">' +
           `<strong>Free tier limit reached.</strong> ` +
-          `Showing top ${visible} of ${total} workers. ` +
-          `${hidden} worker${plural} hidden.` +
-          '<div class="flb-sub">Upgrade to Pro to see all your miners, get Discord webhooks, and unlock customization.</div>' +
+          `${visible} of ${cap} miner slots in use. ` +
+          `${rejectedCount} additional miner${plural} being rejected from the pool.` +
+          '<div class="flb-sub">Upgrade to Pro to allow all your miners to mine, get Discord webhooks, and personalize block signatures.</div>' +
         '</div>' +
         '<a href="/settings#license" class="flb-cta">Upgrade to Pro · £35</a>';
     } else if (banner) {
@@ -1719,55 +1721,48 @@
       </tr>`;
     }).join('');
 
-    // Locked rows for hidden workers (free-tier only)
+    // Locked rows for rejected workers (free-tier only). Real names, real
+    // last-known stats — the user needs to recognize their miner.
     let lockedRows = '';
     let lockedCards = '';
-    const truncated = data && data.workers_truncated;
-    const total = data ? (data.workers_total || 0) : 0;
-    const visible = data ? (data.workers_visible || 0) : 0;
-    const hidden = Math.max(0, total - visible);
-    if (truncated && hidden > 0) {
+    const rejectedWorkers = (data && data.rejected_workers) || [];
+    if (rejectedWorkers.length > 0) {
       const lockCellTpl = (showCta) => PUBLIC_VIEW ? '' :
         `<td class="lock-cell">${showCta ? '<a href="/settings#license" class="lock-cta" title="Unlock all workers">Unlock ↗</a>' : ''}</td>`;
-      const lockedRowsArr = [];
-      for (let i = 0; i < hidden; i++) {
-        lockedRowsArr.push(
-          `<tr class="locked">
-            <td class="worker-name"><span class="lock-icon" aria-hidden="true">🔒</span>worker-hidden-${i + 1}</td>
-            <td>—</td>
-            <td class="num">— TH/s</td>
-            <td class="num">—</td>
-            <td class="num">—</td>
-            ${lockCellTpl(i === 0)}
-          </tr>`
-        );
-      }
+      const lockedRowsArr = rejectedWorkers.map((w, i) =>
+        `<tr class="locked rejected">
+          <td class="worker-name"><span class="lock-icon" aria-hidden="true">🔒</span>${escapeHtml(w.name)}</td>
+          <td><span class="pill err">Rejected</span></td>
+          <td class="num">${escapeHtml(String(w.hashrate_1m))}</td>
+          <td class="num">${fmtDiff(w.best_share)}</td>
+          <td class="num">${escapeHtml(humaniseAge(w.age_s))}</td>
+          ${lockCellTpl(i === 0)}
+        </tr>`
+      );
       lockedRows = lockedRowsArr.join('');
 
-      const plural = hidden === 1 ? '' : 's';
-      const lockedCardsArr = [];
-      for (let i = 0; i < hidden; i++) {
+      const rejCount = rejectedWorkers.length;
+      const plural = rejCount === 1 ? '' : 's';
+      const lockedCardsArr = rejectedWorkers.map((w, i) => {
         const overlay = i === 0
           ? `<div class="lock-overlay">
-               <span style="font-size: 0.78rem; color: var(--muted);">${hidden} more worker${plural} hidden</span>
+               <span style="font-size: 0.78rem; color: var(--muted);">${rejCount} miner${plural} being rejected</span>
                <a href="/settings#license" class="lock-cta">Unlock all ↗</a>
              </div>`
           : '';
-        lockedCardsArr.push(
-          `<div class="miner-card locked">
-            <div class="name-row">
-              <span class="name">🔒 worker-hidden-${i + 1}</span>
-              <span class="pill dim">Locked</span>
-            </div>
-            <div class="stats-row">
-              <div>Hashrate<span class="v">— TH/s</span></div>
-              <div>Best<span class="v">—</span></div>
-              <div>Seen<span class="v">—</span></div>
-            </div>
-            ${overlay}
-          </div>`
-        );
-      }
+        return `<div class="miner-card locked rejected">
+          <div class="name-row">
+            <span class="name">🔒 ${escapeHtml(w.name)}</span>
+            <span class="pill err">Rejected</span>
+          </div>
+          <div class="stats-row">
+            <div>Hashrate<span class="v">${escapeHtml(String(w.hashrate_1m))}</span></div>
+            <div>Best<span class="v">${fmtDiff(w.best_share)}</span></div>
+            <div>Seen<span class="v">${escapeHtml(humaniseAge(w.age_s))}</span></div>
+          </div>
+          ${overlay}
+        </div>`;
+      });
       lockedCards = lockedCardsArr.join('');
     }
 

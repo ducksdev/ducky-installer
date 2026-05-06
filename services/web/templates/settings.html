@@ -197,40 +197,127 @@
       background: var(--panel); border: 1px solid var(--border);
       border-radius: 12px;
       overflow: hidden;
-      margin-bottom: 0.85rem;
+      margin-bottom: 0.5rem;
     }
     .card > header {
-      padding: 0.85rem 1.1rem;
-      display: flex; align-items: center; justify-content: space-between;
-      gap: 0.5rem;
+      padding: 0.75rem 1rem;
+      display: flex; align-items: center;
+      gap: 0.75rem;
     }
     .card > header.collapsible {
       cursor: pointer;
       user-select: none;
       transition: background 0.1s;
     }
-    .card > header.collapsible:hover { background: rgba(255,255,255,0.02); }
-    .card > header h2 {
-      font-size: 0.74rem; font-weight: 600; text-transform: uppercase;
-      letter-spacing: 0.08em; color: var(--muted); margin: 0;
-      display: flex; align-items: center; gap: 0.5rem;
-    }
+    .card > header.collapsible:hover { background: rgba(255,255,255,0.03); }
     .card > header .chevron {
       color: var(--muted); font-size: 0.85rem;
       transition: transform 0.2s;
-      display: inline-block;
-      margin-left: 0.4rem;
+      flex-shrink: 0;
     }
     .card.collapsed > header .chevron { transform: rotate(-90deg); }
     .card .body {
-      padding: 0 1.1rem 1.05rem;
+      padding: 0.25rem 1rem 1rem;
       max-height: 4000px;
       transition: max-height 0.25s ease, padding 0.2s ease, opacity 0.15s ease;
       overflow: hidden;
+      border-top: 1px solid var(--border);
     }
     .card.collapsed .body {
-      max-height: 0; padding-top: 0; padding-bottom: 0;
-      opacity: 0;
+      max-height: 0; padding-top: 0; padding-bottom: 0; opacity: 0;
+      border-top-color: transparent;
+    }
+
+    /* ── settings-row layout ───────────────────────────────────── */
+    .row-icon {
+      flex-shrink: 0;
+      width: 18px; height: 18px;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--muted);
+    }
+    .row-icon svg { width: 18px; height: 18px; }
+    .row-icon.accent { color: var(--accent); }
+    .row-icon.discord { color: #5865f2; }
+    .row-main {
+      flex: 1; min-width: 0;
+      display: flex; flex-direction: column; gap: 1px;
+    }
+    .row-title {
+      font-size: 0.92rem; font-weight: 500; color: var(--fg);
+      display: flex; align-items: center; gap: 0.45rem;
+      letter-spacing: 0;
+      text-transform: none;
+    }
+    .row-summary {
+      font-size: 0.78rem; color: var(--muted);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      font-family: ui-monospace, monospace;
+    }
+    .row-summary.prose { font-family: inherit; }
+    .row-summary .dim { opacity: 0.65; }
+    .row-aux {
+      flex-shrink: 0;
+      display: inline-flex; align-items: center; gap: 0.4rem;
+    }
+    .row-aux .swatch {
+      width: 14px; height: 14px; border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.15);
+    }
+    .row-pill {
+      display: inline-flex; align-items: center;
+      padding: 1px 8px;
+      font-size: 0.62rem; font-weight: 600;
+      letter-spacing: 0.05em; text-transform: uppercase;
+      border-radius: 999px;
+      line-height: 1.5;
+    }
+    .row-pill.ok    { background: rgba(76,217,100,0.15);  color: var(--success); }
+    .row-pill.pro   { background: rgba(249,168,37,0.15);  color: var(--accent); }
+    .row-pill.dim   { background: rgba(138,146,166,0.15); color: var(--muted); }
+    .row-pill.warn  { background: rgba(255,170,0,0.15);   color: var(--warn); }
+    .row-action-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 4px 10px; font-size: 0.74rem;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .row-action-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    /* ── section grouping ──────────────────────────────────────── */
+    .settings-section {
+      margin-bottom: 1.5rem;
+    }
+    .settings-section-label {
+      font-size: 0.66rem;
+      font-weight: 600;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin: 0 0 0.45rem;
+      padding: 0 0.25rem;
+      opacity: 0.7;
+    }
+
+    /* ── save bar ─────────────────────────────────────────────── */
+    .save-bar {
+      display: flex; align-items: center; gap: 0.6rem;
+      margin-top: 1.25rem;
+      padding-top: 0.85rem;
+      border-top: 1px solid var(--border);
+    }
+    .save-bar .save-meta {
+      margin-left: auto;
+      font-size: 0.74rem; color: var(--muted);
+    }
+    @media (max-width: 540px) {
+      .save-bar { flex-wrap: wrap; }
+      .save-bar .save-meta { width: 100%; order: 99; margin-left: 0; }
     }
 
     /* ── form fields ───────────────────────────────────────────── */
@@ -577,26 +664,39 @@
       {% endfor %}
     {% endwith %}
 
-    <div class="note">
-      <span class="label">Note</span>
-      Saving any change to <strong>Stratum difficulty</strong> restarts ckpool.
-      Connected miners drop and reconnect within a few seconds; no shares are lost.
-      Discord changes don't affect ckpool.
-    </div>
+    <!-- ── Section: Account ────────────────────────────────────── -->
+    <div class="settings-section">
+      <h3 class="settings-section-label">Account</h3>
 
     <!-- ── License card (own form — not part of main settings) ── -->
     <div class="card" data-card="license" id="license"
          data-default-collapsed="{{ 'true' if license.is_pro else 'false' }}">
       <header class="collapsible">
-        <h2>
-          License
-          {% if license.is_pro %}
-            <span class="pill ok" style="margin-left: 0.5rem;">Pro</span>
-          {% else %}
-            <span class="pill" style="margin-left: 0.5rem; opacity: 0.7;">Free</span>
-          {% endif %}
-        </h2>
-        <span class="chevron">▼</span>
+        <span class="row-icon {{ 'accent' if license.is_pro else '' }}" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 21h-9a3 3 0 0 1 -3 -3v-1h10v2a2 2 0 0 0 4 0v-14a2 2 0 1 1 2 2h-2"/><path d="M19 17v-13a2 2 0 0 0 -2 -2h-11a2 2 0 0 0 -2 2v12"/><line x1="9" y1="7" x2="13" y2="7"/><line x1="9" y1="11" x2="13" y2="11"/></svg>
+        </span>
+        <span class="row-main">
+          <span class="row-title">
+            License
+            {% if license.is_pro %}
+              <span class="row-pill pro">Pro</span>
+            {% elif license.has_token %}
+              <span class="row-pill warn">Invalid</span>
+            {% else %}
+              <span class="row-pill dim">Free</span>
+            {% endif %}
+          </span>
+          <span class="row-summary prose">
+            {% if license.is_pro %}
+              {{ license.email }} · activated
+            {% elif license_rejected_names %}
+              <span style="color: var(--error, #ff6b6b);">{{ license_rejected_names|length }} miner{{ 's' if license_rejected_names|length != 1 else '' }} rejected</span> · upgrade for unlimited
+            {% else %}
+              {{ license_workers_total }} of {{ free_tier_max_miners }} miner slots in use · £35 to unlock Pro
+            {% endif %}
+          </span>
+        </span>
+        <span class="chevron" aria-hidden="true">▼</span>
       </header>
       <div class="body">
         {% if license.is_pro %}
@@ -626,11 +726,33 @@
             </div>
           {% endif %}
 
-          <p class="help" style="margin-top: 0;">
-            <strong>Free tier active.</strong> You can mine up to {{ free_tier_max_miners }} workers.
-            Pro adds: unlimited miners, Discord webhooks, theme customization,
-            block found celebration overlay, and future Pro features.
-          </p>
+          <!-- Live tier usage -->
+          {% if license_rejected_names %}
+            <div class="note" style="margin-top: 0; border-color: var(--error, #ff6b6b); background: rgba(255,107,107,0.06);">
+              <span class="label" style="color: var(--error, #ff6b6b);">Rejecting now</span>
+              <strong>{{ license_workers_active }} of {{ free_tier_max_miners }} miner slots in use.</strong>
+              {{ license_rejected_names|length }} miner{{ 's' if license_rejected_names|length != 1 else '' }} currently being rejected from the pool:
+              <div style="margin-top: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.4rem;">
+                {% for name in license_rejected_names %}
+                  <span class="mono" style="padding: 0.2rem 0.55rem; background: rgba(255,107,107,0.12); border: 1px solid rgba(255,107,107,0.3); border-radius: 6px; font-size: 0.78rem;">🔒 {{ name }}</span>
+                {% endfor %}
+              </div>
+              <div class="flb-sub" style="margin-top: 0.5rem; font-size: 0.78rem; color: var(--muted);">
+                These miners can't submit shares until you upgrade. They'll keep retrying.
+              </div>
+            </div>
+          {% else %}
+            <p class="help" style="margin-top: 0;">
+              <strong>Free tier active.</strong>
+              {% if license_workers_total == 0 %}
+                No miners connected yet — you can run up to {{ free_tier_max_miners }} on free tier.
+              {% else %}
+                {{ license_workers_total }} of {{ free_tier_max_miners }} miner slots in use.
+              {% endif %}
+              Pro adds: unlimited miners, Discord webhooks, custom block signature, theme customization, and future features.
+            </p>
+          {% endif %}
+
           <p class="help" style="margin-top: 0.4rem;">
             Get a license: <strong>£35 one-time</strong> at
             <a href="{{ purchase_url }}" target="_blank" rel="noopener">{{ purchase_url }}</a>.
@@ -659,16 +781,31 @@
         {% endif %}
       </div>
     </div>
+    </div><!-- /settings-section: Account -->
+
+    <!-- ── Section: Pool ───────────────────────────────────────── -->
+    <div class="settings-section">
+      <h3 class="settings-section-label">Pool</h3>
 
     <form method="post" action="{{ url_for('settings_save') }}" autocomplete="off">
 
       <!-- Stratum difficulty (default collapsed — set once, ignore) -->
       <div class="card" data-card="stratum-diff" data-default-collapsed="true">
         <header class="collapsible">
-          <h2>Stratum difficulty</h2>
-          <span class="chevron">▼</span>
+          <span class="row-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="9" y2="6"/><line x1="15" y1="6" x2="20" y2="6"/><circle cx="12" cy="6" r="3"/><line x1="4" y1="12" x2="14" y2="12"/><circle cx="17" cy="12" r="3"/><line x1="20" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="9" y2="18"/><circle cx="12" cy="18" r="3"/><line x1="15" y1="18" x2="20" y2="18"/></svg>
+          </span>
+          <span class="row-main">
+            <span class="row-title">Stratum difficulty</span>
+            <span class="row-summary">min {{ mindiff_h or '1' }} · start {{ startdiff_h or '1' }} · max {% if settings.maxdiff and settings.maxdiff > 0 %}{{ maxdiff_h }}{% else %}∞{% endif %}</span>
+          </span>
+          <span class="chevron" aria-hidden="true">▼</span>
         </header>
         <div class="body">
+          <div class="note" style="margin-top: 0; margin-bottom: 0.9rem;">
+            <span class="label">Heads up</span>
+            Saving any change here restarts ckpool. Connected miners drop and reconnect within a few seconds — no shares are lost.
+          </div>
           <div class="field" style="margin-bottom: 0.9rem;">
             <label for="diff-preset">Preset</label>
             <select id="diff-preset" class="diff-preset-select">
@@ -716,11 +853,24 @@
       <!-- Dashboard auth (off by default — only relevant if exposing externally) -->
       <div class="card" data-card="dashboard-auth" data-default-collapsed="true">
         <header class="collapsible">
-          <h2>Dashboard auth
-            {% if settings.auth.enabled %}<span class="pill ok">On</span>
-            {% else %}<span class="pill dim">Off</span>{% endif %}
-          </h2>
-          <span class="chevron">▼</span>
+          <span class="row-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><circle cx="12" cy="16" r="1"/><path d="M8 11v-4a4 4 0 0 1 8 0v4"/></svg>
+          </span>
+          <span class="row-main">
+            <span class="row-title">
+              Dashboard auth
+              {% if settings.auth.enabled %}<span class="row-pill ok">On</span>
+              {% else %}<span class="row-pill dim">Off</span>{% endif %}
+            </span>
+            <span class="row-summary prose">
+              {% if settings.auth.enabled %}
+                Password protected · session cookie 14d
+              {% else %}
+                Open access · no password set
+              {% endif %}
+            </span>
+          </span>
+          <span class="chevron" aria-hidden="true">▼</span>
         </header>
         <div class="body">
           <p class="field-help" style="margin-bottom: 0.85rem;">
@@ -780,16 +930,23 @@
       <!-- Block signature (Pro feature) -->
       <div class="card" data-card="block-sig" data-default-collapsed="true">
         <header class="collapsible">
-          <h2>Block signature
-            {% if not license.is_pro %}
-              <span class="pill" style="background: rgba(249, 168, 37, 0.15); color: var(--accent);">Pro</span>
-            {% elif settings.pro.coinbase_suffix %}
-              <span class="pill ok">Custom</span>
-            {% else %}
-              <span class="pill dim">Default</span>
-            {% endif %}
-          </h2>
-          <span class="chevron">▼</span>
+          <span class="row-icon {{ 'accent' if license.is_pro and settings.pro.coinbase_suffix else '' }}" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17c3.333 -2 5 -4 5 -6c0 -3 -1 -3 -2 -3s-2.032 1.085 -2 3c.034 2.048 1.658 2.877 2.5 4c1.5 2 2.5 2.5 3.5 1l2 -3"/><path d="M3 21h18"/><path d="M14 18l1.5 -1.5"/><path d="M18 14l1 -1"/></svg>
+          </span>
+          <span class="row-main">
+            <span class="row-title">
+              Block signature
+              {% if not license.is_pro %}
+                <span class="row-pill pro">Pro</span>
+              {% elif settings.pro.coinbase_suffix %}
+                <span class="row-pill ok">Custom</span>
+              {% else %}
+                <span class="row-pill dim">Default</span>
+              {% endif %}
+            </span>
+            <span class="row-summary">/ducky-pool/{% if settings.pro.coinbase_suffix %}{{ settings.pro.coinbase_suffix }}/{% endif %}</span>
+          </span>
+          <span class="chevron" aria-hidden="true">▼</span>
         </header>
         <div class="body">
           {% if not license.is_pro %}
@@ -839,16 +996,39 @@
           </div>
         </div>
       </div>
+    </div><!-- /settings-section: Pool -->
+
+    <!-- ── Section: Notifications ──────────────────────────────── -->
+    <div class="settings-section">
+      <h3 class="settings-section-label">Notifications</h3>
 
       <!-- Discord (default expanded — most edited section) -->
       <div class="card" data-card="discord" data-default-collapsed="true">
         <header class="collapsible">
-          <h2>Discord webhook
-            {% if not license.is_pro %}<span class="pill" style="background: rgba(249, 168, 37, 0.15); color: var(--accent);">Pro</span>
-            {% elif settings.discord.webhook_url %}<span class="pill ok">Configured</span>
-            {% else %}<span class="pill dim">Off</span>{% endif %}
-          </h2>
-          <span class="chevron">▼</span>
+          <span class="row-icon discord" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.27 5.33C17.94 4.71 16.5 4.26 15 4a.09.09 0 0 0-.07.03c-.18.33-.39.76-.53 1.09a16.09 16.09 0 0 0-4.8 0c-.14-.34-.35-.76-.54-1.09c-.01-.02-.04-.03-.07-.03c-1.5.26-2.93.71-4.27 1.33c-.01 0-.02.01-.03.02c-2.72 4.07-3.47 8.03-3.1 11.95c0 .02.01.04.03.05c1.8 1.32 3.53 2.12 5.24 2.65c.03.01.06 0 .07-.02c.4-.55.76-1.13 1.07-1.74c.02-.04 0-.08-.04-.09c-.57-.22-1.11-.48-1.64-.78c-.04-.02-.04-.08-.01-.11c.11-.08.22-.17.33-.25c.02-.02.05-.02.07-.01c3.44 1.57 7.15 1.57 10.55 0c.02-.01.05-.01.07.01c.11.09.22.17.33.26c.04.03.04.09-.01.11c-.52.31-1.07.56-1.64.78c-.04.01-.05.06-.04.09c.32.61.68 1.19 1.07 1.74c.03.01.06.02.09.01c1.72-.53 3.45-1.33 5.25-2.65c.02-.01.03-.03.03-.05c.44-4.53-.73-8.46-3.1-11.95c-.01-.01-.02-.02-.04-.02zM8.52 14.91c-1.03 0-1.89-.95-1.89-2.12s.84-2.12 1.89-2.12c1.06 0 1.9.96 1.89 2.12c0 1.17-.84 2.12-1.89 2.12zm6.97 0c-1.03 0-1.89-.95-1.89-2.12s.84-2.12 1.89-2.12c1.06 0 1.9.96 1.89 2.12c0 1.17-.83 2.12-1.89 2.12z"/></svg>
+          </span>
+          <span class="row-main">
+            <span class="row-title">
+              Discord webhook
+              {% if not license.is_pro %}<span class="row-pill pro">Pro</span>
+              {% elif settings.discord.webhook_url %}<span class="row-pill ok">Active</span>
+              {% else %}<span class="row-pill dim">Off</span>{% endif %}
+            </span>
+            <span class="row-summary prose">
+              {% if settings.discord.webhook_url %}
+                {% if settings.discord.username %}{{ settings.discord.username }}{% else %}Ducky Pool{% endif %}{% if min_share_h %} · alerts ≥ {{ min_share_h }}{% else %} · all best-share alerts{% endif %}
+              {% else %}
+                <span class="dim">Not configured</span>
+              {% endif %}
+            </span>
+          </span>
+          <span class="row-aux">
+            {% if license.is_pro and settings.discord.webhook_url %}
+              <button type="button" class="row-action-btn" onclick="event.stopPropagation(); document.getElementById('inline-webhook-test').submit();">Test</button>
+            {% endif %}
+          </span>
+          <span class="chevron" aria-hidden="true">▼</span>
         </header>
         <div class="body">
           {% if not license.is_pro %}
@@ -895,16 +1075,29 @@
           </div>
         </div>
       </div>
+    </div><!-- /settings-section: Notifications -->
+
+    <!-- ── Section: Appearance ─────────────────────────────────── -->
+    <div class="settings-section">
+      <h3 class="settings-section-label">Appearance</h3>
 
       <!-- Appearance — per-browser theme/font/text-size. Lives outside
            the form because changes are written to localStorage directly
            and applied live; nothing to POST. -->
       <div class="card" data-card="appearance" data-default-collapsed="true">
         <header class="collapsible">
-          <h2>Appearance
-            <span class="pill" id="appearance-state">Loading…</span>
-          </h2>
-          <span class="chevron">▼</span>
+          <span class="row-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="7.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="12" cy="7.5" r=".5" fill="currentColor"/><circle cx="16.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="9.5" cy="14.5" r=".5" fill="currentColor"/><path d="M12 16v.01"/><path d="M12 12a2 2 0 0 0 2 -2c0 -1.105 -.6 -1 -2 -1c0 -1 1 -1 1 -2s-1 -2 -2 -2c-2 0 -2 2 -2 2"/></svg>
+          </span>
+          <span class="row-main">
+            <span class="row-title">Theme</span>
+            <span class="row-summary prose" id="appearance-summary">Loading…</span>
+          </span>
+          <span class="row-aux">
+            <span class="swatch" id="appearance-bg-swatch" style="background: var(--bg);" aria-hidden="true"></span>
+            <span class="swatch" id="appearance-accent-swatch" style="background: var(--accent);" aria-hidden="true"></span>
+          </span>
+          <span class="chevron" aria-hidden="true">▼</span>
         </header>
         <div class="body">
           <p class="help" style="margin-top: 0;">
@@ -967,8 +1160,24 @@
       <!-- Tier editor — user-defined duck stages -->
       <div class="card" data-card="tiers" data-default-collapsed="true">
         <header class="collapsible">
-          <h2>Duck tiers</h2>
-          <span class="chevron">▼</span>
+          <span class="row-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21l8 0"/><path d="M12 17l0 4"/><path d="M7 4l10 0"/><path d="M17 4v8a5 5 0 0 1 -10 0v-8"/><path d="M5 9m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/><path d="M19 9m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/></svg>
+          </span>
+          <span class="row-main">
+            <span class="row-title">Duck tiers</span>
+            <span class="row-summary prose">
+              {% set tier_count = settings.tiers|length %}
+              {% if tier_count > 0 %}
+                {{ tier_count }} tier{{ 's' if tier_count != 1 else '' }} configured
+              {% else %}
+                <span class="dim">No tiers configured</span>
+              {% endif %}
+            </span>
+          </span>
+          <span class="row-aux" aria-hidden="true" style="font-size: 0.95rem; letter-spacing: -2px;">
+            {% for t in settings.tiers[:5] %}{{ t.emoji }}{% endfor %}
+          </span>
+          <span class="chevron" aria-hidden="true">▼</span>
         </header>
         <div class="body">
           <p class="help" style="margin-top: 0;">
@@ -1057,36 +1266,24 @@
         </div>
       </template>
 
-      <div class="actions-bar">
-        <button type="submit">Save settings</button>
-        <a href="{{ url_for('index') }}">Cancel</a>
-      </div>
-    </form>
+    </div><!-- /settings-section: Appearance -->
+
+    <div class="save-bar">
+      <button type="submit">Save settings</button>
+      <a href="{{ url_for('index') }}" style="color: var(--muted); font-size: 0.86rem; text-decoration: none;">Cancel</a>
+      <span class="save-meta">Changes restart ckpool when difficulty or signature changes</span>
+      {% if settings.auth.enabled %}
+        <button type="button" class="ghost" onclick="document.getElementById('inline-logout').submit();">Sign out</button>
+      {% endif %}
+    </div>
+    </form><!-- /settings_save form -->
 
     {% if settings.auth.enabled %}
-    <div class="actions-bar" style="justify-content: flex-end; margin-top: 0.5rem;">
-      <form method="post" action="{{ url_for('logout') }}" style="display: inline;">
-        <button type="submit" class="ghost">Sign out</button>
-      </form>
-    </div>
+      <form id="inline-logout" method="post" action="{{ url_for('logout') }}" style="display: none;"></form>
     {% endif %}
 
-    {% if settings.discord.webhook_url %}
-      <div class="card" data-card="webhook-test" data-default-collapsed="true" style="margin-top: 1.25rem;">
-        <header class="collapsible">
-          <h2>Test webhook</h2>
-          <span class="chevron">▼</span>
-        </header>
-        <div class="body">
-          <p class="field-help" style="margin-bottom: 0.75rem;">
-            Posts a sample message with the current username and avatar.
-            Save first if you've changed those above.
-          </p>
-          <form method="post" action="{{ url_for('test_webhook') }}">
-            <button type="submit" class="ghost">Send test message</button>
-          </form>
-        </div>
-      </div>
+    {% if license.is_pro and settings.discord.webhook_url %}
+      <form id="inline-webhook-test" method="post" action="{{ url_for('test_webhook') }}" style="display: none;"></form>
     {% endif %}
 
   </div>
@@ -1148,8 +1345,32 @@
     const swatchEl = document.getElementById('theme-accent-swatch');
     const clearEl  = document.getElementById('theme-accent-clear');
     const resetEl  = document.getElementById('theme-reset-all');
-    const stateEl  = document.getElementById('appearance-state');
+    const summaryEl = document.getElementById('appearance-summary');
+    const bgSwatchEl = document.getElementById('appearance-bg-swatch');
+    const accentSwatchEl = document.getElementById('appearance-accent-swatch');
     if (!modeEl) return;
+
+    function updateSummary() {
+      if (!summaryEl) return;
+      const mode = modeEl.value || 'dark';
+      const size = sizeEl.value || 'normal';
+      const font = fontEl.value || 'system';
+      const accent = (accentEl.value || '').replace('#', '').toLowerCase();
+      const modeLabel = { dark: 'Dark', light: 'Light', contrast: 'High contrast', auto: 'Auto' }[mode] || mode;
+      const fontLabel = font === 'system' ? 'System font' : font.charAt(0).toUpperCase() + font.slice(1);
+      const accentLabel = accent ? 'Custom accent' : 'Default accent';
+      const sizeLabel = size === 'normal' ? '' : ' · ' + (size === 'large' ? 'Large text' : size === 'xl' ? 'XL text' : size);
+      summaryEl.textContent = `${modeLabel} · ${accentLabel} · ${fontLabel}${sizeLabel}`;
+      // Update swatches to reflect current state
+      if (bgSwatchEl) {
+        const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#0d1117';
+        bgSwatchEl.style.background = bg;
+      }
+      if (accentSwatchEl) {
+        const accentColor = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#f9a825';
+        accentSwatchEl.style.background = accentColor;
+      }
+    }
 
     function applyMode(mode) {
       // 'auto' resolves at apply time; we set the attr only for concrete
@@ -1196,14 +1417,9 @@
     }
 
     function flashState(text) {
-      if (!stateEl) return;
-      stateEl.textContent = text;
-      stateEl.classList.add('ok');
-      clearTimeout(flashState._t);
-      flashState._t = setTimeout(() => {
-        stateEl.classList.remove('ok');
-        stateEl.textContent = 'Active';
-      }, 1200);
+      // No-op visually now — summary updates carry the message. Kept as
+      // a stub so existing call sites still work without modification.
+      updateSummary();
     }
 
     // Initialise dropdowns from stored values
@@ -1216,7 +1432,7 @@
       accentEl.value = v;
       if (/^#[0-9a-f]{6}$/i.test(v)) swatchEl.value = v;
     }
-    if (stateEl) stateEl.textContent = 'Active';
+    updateSummary();
 
     // Bind change handlers
     modeEl.addEventListener('change', () => {
