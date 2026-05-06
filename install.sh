@@ -665,11 +665,113 @@ handle_wipe_marker() {
     fi
 }
 
+handle_drop_workers() {
+    # Free-tier worker cap enforcement. The web container writes
+    # \$MARKER_DIR/.drop_workers when there are workers above the free
+    # tier limit. We query ckpool for current stratum clients, match by
+    # worker name, and tell ckpool to drop them. The miner's firmware
+    # will reconnect automatically — we'll drop them again on the next
+    # tick. Effectively the worker is locked out of mining.
+    #
+    # Marker is ONLY removed by the web container (when user upgrades
+    # to Pro or stops connecting extra workers). We just enforce.
+    local marker="\$MARKER_DIR/.drop_workers"
+    [ -f "\$marker" ] || return 0
+
+    # Ignore stale markers (web container may have crashed). >5min old = stale.
+    local marker_age
+    marker_age=\$(( \$(date +%s) - \$(stat -c %Y "\$marker" 2>/dev/null || echo 0) ))
+    if [ "\$marker_age" -gt 300 ]; then
+        return 0
+    fi
+
+    # Query ckpool for current connected clients via its stratifier IPC.
+    # Output format may be a JSON array OR newline-delimited JSON objects;
+    # the parser handles both. Each client has 'id' and 'workername' fields.
+    local clients_json
+    clients_json=\$(/usr/bin/docker exec ducky-ckpool ckpmsg -s /tmp/ckpool/stratifier clients 2>/dev/null)
+    [ -z "\$clients_json" ] && return 0
+
+    # Match worker names from the marker against connected clients.
+    # Pass clients via stdin to avoid shell-quoting hazards in the JSON.
+    local ids_to_drop
+    ids_to_drop=\$(echo "\$clients_json" | MARKER_PATH="\$marker" python3 -c '
+import json, os, sys
+try:
+    with open(os.environ["MARKER_PATH"], "r", encoding="utf-8") as f:
+        marker = json.load(f)
+    targets = set(marker.get("workers") or [])
+    if not targets:
+        sys.exit(0)
+    raw = sys.stdin.read().strip()
+    clients = []
+    if raw.startswith("["):
+        try:
+            clients = json.loads(raw)
+        except Exception:
+            pass
+    else:
+        for line in raw.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+                if isinstance(obj, list):
+                    clients.extend(obj)
+                else:
+                    clients.append(obj)
+            except Exception:
+                continue
+    for c in clients:
+        if not isinstance(c, dict):
+            continue
+        wname = c.get("workername") or c.get("worker") or ""
+        cid = c.get("id")
+        if cid is None:
+            cid = c.get("client_id")
+        if wname in targets and cid is not None:
+            print(cid)
+except Exception:
+    pass
+' 2>/dev/null)
+
+    [ -z "\$ids_to_drop" ] && return 0
+
+    local dropped_count=0
+    while IFS= read -r cid; do
+        [ -z "\$cid" ] && continue
+        if /usr/bin/docker exec ducky-ckpool ckpmsg -s /tmp/ckpool/connector "dropclient=\$cid" >/dev/null 2>&1; then
+            dropped_count=\$((dropped_count + 1))
+        fi
+    done <<< "\$ids_to_drop"
+
+    if [ "\$dropped_count" -gt 0 ]; then
+        echo "[ducky-restart-watcher] free-tier cap: dropped \$dropped_count over-limit worker(s)"
+    fi
+}
+
+    [ -z "\$ids_to_drop" ] && return 0
+
+    local dropped_count=0
+    while IFS= read -r cid; do
+        [ -z "\$cid" ] && continue
+        if /usr/bin/docker exec ducky-ckpool ckpmsg -s /tmp/ckpool/connector "dropclient=\$cid" >/dev/null 2>&1; then
+            dropped_count=\$((dropped_count + 1))
+        fi
+    done <<< "\$ids_to_drop"
+
+    if [ "\$dropped_count" -gt 0 ]; then
+        echo "[ducky-restart-watcher] free-tier cap: dropped \$dropped_count over-limit worker(s)"
+    fi
+}
+
 while true; do
     handle_wipe_marker
     handle_marker "\$MARKER_DIR/.restart_ckpool"  "ckpool"
     handle_marker "\$MARKER_DIR/.restart_bchnode" "bchnode"
     handle_marker "\$MARKER_DIR/.restart_web"     "web"
+    handle_drop_workers
     sleep 2
 done
 WATCHER

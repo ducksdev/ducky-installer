@@ -615,6 +615,37 @@
     .miners-empty { color: var(--muted); font-size: 0.86rem; padding: 0.5rem 0; }
     .row-actions { display: flex; gap: 0.25rem; justify-content: flex-end; }
 
+    /* ── miners count pill (header — shows N / cap) ──────────────── */
+    .miners-count {
+      display: inline-flex; align-items: center;
+      padding: 0.18rem 0.6rem;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      font-family: ui-monospace, monospace;
+      letter-spacing: 0.02em;
+      margin-left: 0.5rem;
+      line-height: 1;
+      border: 1px solid transparent;
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .miners-count.pro {
+      background: rgba(249,168,37,0.12);
+      color: var(--accent);
+      border-color: rgba(249,168,37,0.3);
+    }
+    .miners-count.free {
+      background: rgba(138,146,166,0.12);
+      color: var(--muted);
+      border-color: var(--border);
+    }
+    .miners-count.free-cap {
+      background: linear-gradient(135deg, rgba(249,168,37,0.18), rgba(249,168,37,0.08));
+      color: var(--accent);
+      border-color: rgba(249,168,37,0.5);
+      box-shadow: 0 0 0 1px rgba(249,168,37,0.1);
+    }
+
     /* ── free-tier limit banner + locked rows ──────────────────── */
     .free-limit-banner {
       display: flex; align-items: center; gap: 0.85rem;
@@ -1056,8 +1087,14 @@
         <div class="card" data-card="miners">
           <header class="collapsible">
             <h2>Miners
-              {% if workers_truncated %}
-                <span class="pill" id="miners-count-pill" style="background: rgba(249, 168, 37, 0.15); color: var(--accent); margin-left: 0.4rem; border: 1px solid rgba(249,168,37,0.3);">Free · {{ workers_visible }} / {{ workers_total }}</span>
+              {% if workers_total > 0 %}
+                {% if is_pro_tier %}
+                  <span class="miners-count pro" id="miners-count-pill" title="{{ workers_total }} worker{{ 's' if workers_total != 1 else '' }} · Pro tier (unlimited)">{{ workers_total }} / ∞</span>
+                {% elif workers_truncated %}
+                  <span class="miners-count free-cap" id="miners-count-pill" title="Free tier limit reached — upgrade for unlimited">{{ workers_visible }} / {{ worker_cap }}</span>
+                {% else %}
+                  <span class="miners-count free" id="miners-count-pill" title="Free tier — {{ workers_total }} of {{ worker_cap }} workers used">{{ workers_total }} / {{ worker_cap }}</span>
+                {% endif %}
               {% endif %}
             </h2>
             <span class="chevron">▼</span>
@@ -1605,23 +1642,37 @@
     const total = data.workers_total || 0;
     const visible = data.workers_visible || 0;
     const hidden = Math.max(0, total - visible);
+    const pro = !!data.is_pro_tier;
+    const cap = data.worker_cap;  // null when Pro, integer when free
 
-    // Header count pill — "Free · 3 / 5"
+    // Header count pill — three states (pro, free, free-cap)
     let pill = headerH2 ? headerH2.querySelector('#miners-count-pill') : null;
-    if (truncated) {
+    if (total > 0) {
       if (!pill && headerH2) {
         pill = document.createElement('span');
         pill.id = 'miners-count-pill';
-        pill.className = 'pill';
-        pill.style.cssText = 'background: rgba(249, 168, 37, 0.15); color: var(--accent); margin-left: 0.4rem; border: 1px solid rgba(249,168,37,0.3);';
         headerH2.appendChild(pill);
       }
-      if (pill) pill.textContent = `Free · ${visible} / ${total}`;
+      if (pill) {
+        if (pro) {
+          pill.className = 'miners-count pro';
+          pill.textContent = `${total} / ∞`;
+          pill.title = `${total} worker${total === 1 ? '' : 's'} · Pro tier (unlimited)`;
+        } else if (truncated) {
+          pill.className = 'miners-count free-cap';
+          pill.textContent = `${visible} / ${cap}`;
+          pill.title = 'Free tier limit reached — upgrade for unlimited';
+        } else {
+          pill.className = 'miners-count free';
+          pill.textContent = `${total} / ${cap}`;
+          pill.title = `Free tier — ${total} of ${cap} workers used`;
+        }
+      }
     } else if (pill) {
       pill.remove();
     }
 
-    // Body banner — full free-limit-banner element
+    // Body banner — only shown when truncated (free + over cap)
     let banner = document.getElementById('miners-truncation-note');
     if (truncated) {
       if (!banner) {
