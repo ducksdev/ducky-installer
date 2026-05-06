@@ -2462,6 +2462,65 @@ def _start_share_tailer() -> None:
 # ──────────────────────────── main watcher loop ────────────────────────────
 
 
+# Marker file the host-side restart watcher reads to enforce the free-tier
+# worker cap. Format: JSON {"workers": ["addr.name1", "addr.name2"], "ts": ...}
+# These workers will be repeatedly dropped from ckpool until either:
+#   (a) the user upgrades to Pro, or
+#   (b) the workers stop attempting to connect.
+DROP_WORKERS_MARKER = os.path.join(STATE_DIR, ".drop_workers")
+
+
+def _update_worker_cap_enforcement() -> None:
+    """Pick which workers to drop (if any) and write the marker for the
+    host-side watcher. Called on every watcher tick.
+
+    Free tier with >3 workers: bottom (N - 3) by hashrate get marked for
+    drop. Same sort logic as the dashboard's truncation — the workers the
+    user CAN see in the dashboard are the same ones we let mine.
+
+    Pro tier OR free with <=3 workers: marker is cleared so the host
+    watcher knows there's nothing to enforce."""
+    try:
+        if is_pro():
+            _clear_drop_marker()
+            return
+        workers = get_workers()
+        if len(workers) <= FREE_TIER_MAX_MINERS:
+            _clear_drop_marker()
+            return
+        # Sort by hashrate descending; the BOTTOM ones are the ones to drop.
+        sorted_w = sorted(
+            workers,
+            key=lambda w: _hashrate_str_to_float(w.get("hashrate_1m") or "0H/s") or 0,
+            reverse=True,
+        )
+        to_drop = sorted_w[FREE_TIER_MAX_MINERS:]
+        # Use the full id (e.g. "address.workername") so the watcher can
+        # match against ckpool's stratifier output exactly.
+        worker_ids = [w.get("id") or w.get("name") for w in to_drop if w.get("id") or w.get("name")]
+        payload = {
+            "workers": worker_ids,
+            "ts": int(time.time()),
+        }
+        # Atomic write so the watcher never reads a half-written file.
+        tmp = DROP_WORKERS_MARKER + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        os.replace(tmp, DROP_WORKERS_MARKER)
+    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("worker cap enforcement failed: %s", exc)
+
+
+def _clear_drop_marker() -> None:
+    """Remove the drop marker if it exists. Idempotent."""
+    try:
+        os.remove(DROP_WORKERS_MARKER)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        app.logger.warning("could not remove drop marker: %s", exc)
+
+
 def _watcher_loop() -> None:
     global _last_history_ts
     while True:
@@ -2474,6 +2533,10 @@ def _watcher_loop() -> None:
             _check_blocks_and_fire(now)
         except Exception as exc:  # noqa: BLE001
             app.logger.exception("blocks watcher tick failed: %s", exc)
+        try:
+            _update_worker_cap_enforcement()
+        except Exception as exc:  # noqa: BLE001
+            app.logger.exception("worker cap watcher tick failed: %s", exc)
         # Record a history sample on its own cadence (every minute by default)
         if now - _last_history_ts >= HISTORY_SAMPLE_INTERVAL:
             try:
@@ -2620,7 +2683,11 @@ def _build_stats_payload(public: bool = False) -> dict:
     # Only the dashboard UI gets the truncated list. Sort by hashrate
     # so the user sees their biggest miners at the cap.
     full_count = len(workers)
-    if not is_pro() and full_count > FREE_TIER_MAX_MINERS:
+    pro = is_pro()
+    payload["is_pro_tier"] = pro
+    payload["worker_cap"] = None if pro else FREE_TIER_MAX_MINERS
+
+    if not pro and full_count > FREE_TIER_MAX_MINERS:
         sorted_workers = sorted(
             workers,
             key=lambda w: _hashrate_str_to_float(w.get("hashrate_1m") or "0H/s") or 0,
@@ -2700,6 +2767,8 @@ def index():
         workers_truncated=payload.get("workers_truncated", False),
         workers_total=payload.get("workers_total", 0),
         workers_visible=payload.get("workers_visible", 0),
+        worker_cap=payload.get("worker_cap"),
+        is_pro_tier=payload.get("is_pro_tier", False),
         blocks=payload["blocks"],
         eta=payload["eta"],
         net_diff_human=payload["net_diff_human"],
@@ -2727,6 +2796,8 @@ def public_view():
         workers_truncated=payload.get("workers_truncated", False),
         workers_total=payload.get("workers_total", 0),
         workers_visible=payload.get("workers_visible", 0),
+        worker_cap=payload.get("worker_cap"),
+        is_pro_tier=payload.get("is_pro_tier", False),
         blocks=payload["blocks"],
         eta=payload["eta"],
         net_diff_human=payload["net_diff_human"],
