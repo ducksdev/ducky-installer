@@ -3184,6 +3184,10 @@ def settings_save():
         "tiers": _normalise_tiers(tier_rows),
         "auth": new_auth,
         "pro": new_pro,
+        # The main settings form doesn't include the license token field
+        # (license has its own /license/save endpoint). Carry the existing
+        # value through so saving other settings doesn't reset to free tier.
+        "license": dict(s.get("license", {})),
     }
     save_settings(new)
 
