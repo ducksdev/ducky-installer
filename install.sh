@@ -30,6 +30,22 @@ WEB_PORT="${WEB_PORT:-4568}"
 P2P_PORT="${P2P_PORT:-8333}"
 BCHN_IMAGE="${BCHN_IMAGE:-zquestz/bitcoin-cash-node:latest}"
 
+# License signing secret. This is intentionally a fixed string in the
+# distribution: license tokens minted with this secret (via the
+# scripts/issue_license.py tool) will validate on every install that
+# uses the same install.sh. Rotating this string in a future release
+# invalidates ALL outstanding tokens, which is the revocation
+# mechanism if a leak occurs.
+#
+# The secret being committed to the public repo is fine for our
+# honor-system license model: HMAC just prevents trivial forging,
+# enforcement is legal/contractual not cryptographic. Anyone running
+# their own fork should generate their own secret and update this line.
+DUCKY_LICENSE_SECRET="${DUCKY_LICENSE_SECRET:-yiavWbjbGnKlwNF9rvrbtyNcScwMfxCgWit4_1QF3n4}"
+DUCKY_PURCHASE_URL="${DUCKY_PURCHASE_URL:-https://ducksdev.gumroad.com/l/ducky-pool-pro}"
+APP_VERSION="${APP_VERSION:-1.0}"
+GITHUB_URL_DEFAULT="${GITHUB_URL:-https://github.com/ducksdev/ducky-installer}"
+
 # Branch / channel switch. Default is `main` for stable users. Set
 # BRANCH=dev (or another branch name) to fetch in-progress changes
 # during development. Both branches share the same install.sh — the
@@ -316,6 +332,16 @@ services:
       HOST_PROC: /host-proc
       HOST_ROOT: /host-root
       BCHNODE_LOG: /bchnode-logs/debug.log
+      # License signing secret. When set, validates Pro license tokens
+      # signed with the SAME secret on the developer's side. When empty,
+      # the dashboard runs in free tier with no Pro features. On
+      # ducksdev's official builds this comes from a host-side env file
+      # written by the installer; users running their own forks should
+      # generate and bake in their own secret to issue tokens.
+      DUCKY_LICENSE_SECRET: "${DUCKY_LICENSE_SECRET:-}"
+      DUCKY_PURCHASE_URL: "${DUCKY_PURCHASE_URL:-https://ducksdev.gumroad.com/l/ducky-pool-pro}"
+      APP_VERSION: "${APP_VERSION:-1.0}"
+      GITHUB_URL: "${GITHUB_URL:-https://github.com/ducksdev/ducky-installer}"
     volumes:
       - ${DATA_DIR}/shared:/shared:rw
       # Read pool.status + workers/* and allow removing worker files

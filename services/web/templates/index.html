@@ -477,6 +477,64 @@
     .pill.err   { background: rgba(255,107,107,0.15); color: var(--error); }
     .pill.dim   { background: rgba(138,146,166,0.15); color: var(--muted); }
 
+    /* ── tier badge (header — shows Free/Pro license tier) ──────── */
+    .tier-badge-wrap {
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      margin-left: 0.5rem;
+    }
+    .tier-badge {
+      display: inline-flex; align-items: center; gap: 0.3rem;
+      padding: 0.22rem 0.65rem;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      text-decoration: none;
+      transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+      line-height: 1;
+      white-space: nowrap;
+    }
+    .tier-badge.pro {
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent-deep) 100%);
+      color: #1a1d24;
+      box-shadow: 0 1px 0 rgba(255,255,255,0.15) inset, 0 2px 6px rgba(249,168,37,0.25);
+      border: 1px solid var(--accent-deep);
+    }
+    .tier-badge.pro:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 1px 0 rgba(255,255,255,0.2) inset, 0 4px 12px rgba(249,168,37,0.4);
+    }
+    .tier-badge.free {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .tier-badge .tier-icon {
+      font-size: 0.85em;
+      line-height: 1;
+    }
+    .tier-badge-upgrade {
+      font-size: 0.7rem;
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 500;
+      padding: 0.18rem 0.55rem;
+      border-radius: 999px;
+      border: 1px solid transparent;
+      transition: border-color 0.15s, background 0.15s;
+      letter-spacing: 0.01em;
+      white-space: nowrap;
+    }
+    .tier-badge-upgrade:hover {
+      border-color: var(--accent);
+      background: rgba(249,168,37,0.1);
+    }
+    @media (max-width: 640px) {
+      .tier-badge { font-size: 0.62rem; padding: 0.18rem 0.5rem; }
+      .tier-badge-upgrade { display: none; }  /* save space, badge alone reads */
+    }
+
     /* ── stats grid ────────────────────────────────────────────── */
     .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem; }
     .stats.cols-4 { grid-template-columns: repeat(4, 1fr); }
@@ -556,6 +614,110 @@
     .miners .num { font-family: ui-monospace, monospace; }
     .miners-empty { color: var(--muted); font-size: 0.86rem; padding: 0.5rem 0; }
     .row-actions { display: flex; gap: 0.25rem; justify-content: flex-end; }
+
+    /* ── free-tier limit banner + locked rows ──────────────────── */
+    .free-limit-banner {
+      display: flex; align-items: center; gap: 0.85rem;
+      padding: 0.85rem 1rem;
+      margin-bottom: 0.85rem;
+      background: linear-gradient(135deg, rgba(249,168,37,0.08), rgba(249,168,37,0.03));
+      border: 1px solid rgba(249,168,37,0.4);
+      border-radius: 10px;
+    }
+    .free-limit-banner .flb-icon {
+      font-size: 1.4rem; line-height: 1;
+      flex-shrink: 0;
+    }
+    .free-limit-banner .flb-text {
+      flex: 1; min-width: 0;
+      font-size: 0.86rem;
+      color: var(--fg);
+    }
+    .free-limit-banner .flb-text strong { color: var(--accent); font-weight: 600; }
+    .free-limit-banner .flb-sub {
+      font-size: 0.76rem; color: var(--muted);
+      margin-top: 0.15rem;
+    }
+    .free-limit-banner .flb-cta {
+      display: inline-flex; align-items: center; gap: 0.35rem;
+      padding: 0.45rem 0.95rem;
+      background: var(--accent);
+      color: #1a1d24;
+      text-decoration: none;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.82rem;
+      flex-shrink: 0;
+      transition: transform 0.15s, box-shadow 0.15s;
+      box-shadow: 0 1px 0 rgba(255,255,255,0.15) inset;
+    }
+    .free-limit-banner .flb-cta:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 1px 0 rgba(255,255,255,0.2) inset, 0 4px 10px rgba(249,168,37,0.3);
+    }
+    @media (max-width: 540px) {
+      .free-limit-banner { flex-wrap: wrap; padding: 0.75rem; gap: 0.5rem; }
+      .free-limit-banner .flb-cta { width: 100%; justify-content: center; }
+    }
+
+    /* Locked rows: ghosted entries showing what's hidden behind paywall */
+    .miners tr.locked td {
+      opacity: 0.45;
+      color: var(--muted) !important;
+      pointer-events: none;
+      user-select: none;
+    }
+    .miners tr.locked .worker-name {
+      filter: blur(3px);
+    }
+    .miners tr.locked .lock-cell {
+      filter: none; opacity: 1; pointer-events: auto;
+      text-align: right;
+    }
+    .miners tr.locked td:not(.lock-cell) .lock-icon {
+      display: inline-block;
+      margin-right: 0.4rem;
+      filter: none;
+      opacity: 0.9;
+    }
+    .miners tr.locked .lock-cta {
+      display: inline-flex; align-items: center; gap: 0.3rem;
+      padding: 0.25rem 0.7rem;
+      background: var(--accent);
+      color: #1a1d24;
+      text-decoration: none;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 0.74rem;
+      pointer-events: auto;
+      filter: none;
+    }
+    .miners tr.locked .lock-cta:hover { opacity: 0.9; }
+    /* Mobile card variant of locked entries */
+    .miner-card.locked {
+      opacity: 0.6;
+      position: relative;
+      background: var(--panel-soft);
+      border-style: dashed;
+    }
+    .miner-card.locked .name {
+      filter: blur(3px); user-select: none;
+    }
+    .miner-card.locked .lock-overlay {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 0.5rem; margin-top: 0.5rem;
+      padding-top: 0.5rem; border-top: 1px dashed var(--border);
+      filter: none; opacity: 1;
+    }
+    .miner-card.locked .lock-overlay .lock-cta {
+      padding: 0.35rem 0.85rem;
+      background: var(--accent);
+      color: #1a1d24;
+      text-decoration: none;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 0.78rem;
+    }
 
     /* On mobile, switch the miners table to card-per-worker */
     .miner-cards { display: none; flex-direction: column; gap: 0.5rem; }
@@ -745,6 +907,18 @@
         </a>
       </h1>
       <span id="live-indicator" class="live-dot" title="Live — updates every 10s"></span>
+      {% if license.is_pro %}
+        <span class="tier-badge-wrap">
+          <span class="tier-badge pro" title="Pro license active for {{ license.email }}">
+            <span class="tier-icon" aria-hidden="true">👑</span>Pro
+          </span>
+        </span>
+      {% elif not public %}
+        <span class="tier-badge-wrap">
+          <a href="{{ url_for('settings_page') }}#license" class="tier-badge free" title="Free tier — view limits">Free</a>
+          <a href="{{ url_for('settings_page') }}#license" class="tier-badge-upgrade" title="Unlock all features">Upgrade ↗</a>
+        </span>
+      {% endif %}
       <span class="grow"></span>
       {% if not public %}
         <a class="nav" href="{{ url_for('public_view') }}" title="Public read-only view">View as public</a>
@@ -881,10 +1055,27 @@
         <!-- Miners -->
         <div class="card" data-card="miners">
           <header class="collapsible">
-            <h2>Miners</h2>
+            <h2>Miners
+              {% if workers_truncated %}
+                <span class="pill" id="miners-count-pill" style="background: rgba(249, 168, 37, 0.15); color: var(--accent); margin-left: 0.4rem; border: 1px solid rgba(249,168,37,0.3);">Free · {{ workers_visible }} / {{ workers_total }}</span>
+              {% endif %}
+            </h2>
             <span class="chevron">▼</span>
           </header>
           <div class="body">
+            {% if workers_truncated %}
+            {% set hidden_count = workers_total - workers_visible %}
+            <div class="free-limit-banner" id="miners-truncation-note">
+              <span class="flb-icon" aria-hidden="true">🔒</span>
+              <div class="flb-text">
+                <strong>Free tier limit reached.</strong>
+                Showing top {{ workers_visible }} of {{ workers_total }} workers.
+                {{ hidden_count }} worker{{ 's' if hidden_count != 1 else '' }} hidden.
+                <div class="flb-sub">Upgrade to Pro to see all your miners, get Discord webhooks, and unlock customization.</div>
+              </div>
+              <a href="{{ url_for('settings_page') }}#license" class="flb-cta">Upgrade to Pro · £35</a>
+            </div>
+            {% endif %}
             <div id="miners-body">
               <!-- server-side initial render -->
               {% if workers %}
@@ -927,6 +1118,27 @@
                         {% endif %}
                       </tr>
                     {% endfor %}
+                    {% if workers_truncated %}
+                      {% set hidden_count = workers_total - workers_visible %}
+                      {% for _ in range(hidden_count) %}
+                        <tr class="locked">
+                          <td class="worker-name">
+                            <span class="lock-icon" aria-hidden="true">🔒</span>worker-hidden-{{ loop.index }}
+                          </td>
+                          <td>—</td>
+                          <td class="num">— TH/s</td>
+                          <td class="num">—</td>
+                          <td class="num">—</td>
+                          {% if not public %}
+                          <td class="lock-cell">
+                            {% if loop.first %}
+                              <a href="{{ url_for('settings_page') }}#license" class="lock-cta" title="Unlock all workers">Unlock ↗</a>
+                            {% endif %}
+                          </td>
+                          {% endif %}
+                        </tr>
+                      {% endfor %}
+                    {% endif %}
                   </tbody>
                 </table>
                 <!-- mobile card layout — populated by JS but server-rendered for first paint -->
@@ -961,6 +1173,28 @@
                       </div>
                     </div>
                   {% endfor %}
+                  {% if workers_truncated %}
+                    {% set hidden_count = workers_total - workers_visible %}
+                    {% for i in range(hidden_count) %}
+                      <div class="miner-card locked">
+                        <div class="name-row">
+                          <span class="name">🔒 worker-hidden-{{ loop.index }}</span>
+                          <span class="pill dim">Locked</span>
+                        </div>
+                        <div class="stats-row">
+                          <div>Hashrate<br><span class="v">— TH/s</span></div>
+                          <div>Best<br><span class="v">—</span></div>
+                          <div>Seen<br><span class="v">—</span></div>
+                        </div>
+                        {% if loop.first %}
+                          <div class="lock-overlay">
+                            <span style="font-size: 0.78rem; color: var(--muted);">{{ hidden_count }} more worker{{ 's' if hidden_count != 1 else '' }} hidden</span>
+                            <a href="{{ url_for('settings_page') }}#license" class="lock-cta">Unlock all ↗</a>
+                          </div>
+                        {% endif %}
+                      </div>
+                    {% endfor %}
+                  {% endif %}
                 </div>
               {% else %}
                 <p class="miners-empty">No miners connected yet. Point one at the stratum URL.</p>
@@ -1358,7 +1592,60 @@
     }).join('');
   }
 
-  function renderWorkers(workers) {
+  // Banner shown above the Miners table when the free-tier worker
+  // cap is in effect. Re-renders on every poll so connecting/
+  // disconnecting workers trips the banner immediately.
+  function updateMinersTruncation(data) {
+    const card = document.querySelector('[data-card="miners"]');
+    if (!card) return;
+    const body = card.querySelector('.body');
+    if (!body) return;
+    const headerH2 = card.querySelector('header h2');
+    const truncated = !!data.workers_truncated;
+    const total = data.workers_total || 0;
+    const visible = data.workers_visible || 0;
+    const hidden = Math.max(0, total - visible);
+
+    // Header count pill — "Free · 3 / 5"
+    let pill = headerH2 ? headerH2.querySelector('#miners-count-pill') : null;
+    if (truncated) {
+      if (!pill && headerH2) {
+        pill = document.createElement('span');
+        pill.id = 'miners-count-pill';
+        pill.className = 'pill';
+        pill.style.cssText = 'background: rgba(249, 168, 37, 0.15); color: var(--accent); margin-left: 0.4rem; border: 1px solid rgba(249,168,37,0.3);';
+        headerH2.appendChild(pill);
+      }
+      if (pill) pill.textContent = `Free · ${visible} / ${total}`;
+    } else if (pill) {
+      pill.remove();
+    }
+
+    // Body banner — full free-limit-banner element
+    let banner = document.getElementById('miners-truncation-note');
+    if (truncated) {
+      if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'miners-truncation-note';
+        banner.className = 'free-limit-banner';
+        body.insertBefore(banner, body.firstChild);
+      }
+      const plural = hidden === 1 ? '' : 's';
+      banner.innerHTML =
+        '<span class="flb-icon" aria-hidden="true">🔒</span>' +
+        '<div class="flb-text">' +
+          `<strong>Free tier limit reached.</strong> ` +
+          `Showing top ${visible} of ${total} workers. ` +
+          `${hidden} worker${plural} hidden.` +
+          '<div class="flb-sub">Upgrade to Pro to see all your miners, get Discord webhooks, and unlock customization.</div>' +
+        '</div>' +
+        '<a href="/settings#license" class="flb-cta">Upgrade to Pro · £35</a>';
+    } else if (banner) {
+      banner.remove();
+    }
+  }
+
+  function renderWorkers(workers, data) {
     if (!workers.length) {
       return '<p class="miners-empty">No miners connected yet. Point one at the stratum URL.</p>';
     }
@@ -1380,13 +1667,66 @@
         ${actionCell}
       </tr>`;
     }).join('');
+
+    // Locked rows for hidden workers (free-tier only)
+    let lockedRows = '';
+    let lockedCards = '';
+    const truncated = data && data.workers_truncated;
+    const total = data ? (data.workers_total || 0) : 0;
+    const visible = data ? (data.workers_visible || 0) : 0;
+    const hidden = Math.max(0, total - visible);
+    if (truncated && hidden > 0) {
+      const lockCellTpl = (showCta) => PUBLIC_VIEW ? '' :
+        `<td class="lock-cell">${showCta ? '<a href="/settings#license" class="lock-cta" title="Unlock all workers">Unlock ↗</a>' : ''}</td>`;
+      const lockedRowsArr = [];
+      for (let i = 0; i < hidden; i++) {
+        lockedRowsArr.push(
+          `<tr class="locked">
+            <td class="worker-name"><span class="lock-icon" aria-hidden="true">🔒</span>worker-hidden-${i + 1}</td>
+            <td>—</td>
+            <td class="num">— TH/s</td>
+            <td class="num">—</td>
+            <td class="num">—</td>
+            ${lockCellTpl(i === 0)}
+          </tr>`
+        );
+      }
+      lockedRows = lockedRowsArr.join('');
+
+      const plural = hidden === 1 ? '' : 's';
+      const lockedCardsArr = [];
+      for (let i = 0; i < hidden; i++) {
+        const overlay = i === 0
+          ? `<div class="lock-overlay">
+               <span style="font-size: 0.78rem; color: var(--muted);">${hidden} more worker${plural} hidden</span>
+               <a href="/settings#license" class="lock-cta">Unlock all ↗</a>
+             </div>`
+          : '';
+        lockedCardsArr.push(
+          `<div class="miner-card locked">
+            <div class="name-row">
+              <span class="name">🔒 worker-hidden-${i + 1}</span>
+              <span class="pill dim">Locked</span>
+            </div>
+            <div class="stats-row">
+              <div>Hashrate<span class="v">— TH/s</span></div>
+              <div>Best<span class="v">—</span></div>
+              <div>Seen<span class="v">—</span></div>
+            </div>
+            ${overlay}
+          </div>`
+        );
+      }
+      lockedCards = lockedCardsArr.join('');
+    }
+
     const adminCol = PUBLIC_VIEW ? '' : '<th></th>';
     const table = `<table class="miners">
       <thead><tr>
         <th>Worker</th><th>Status</th><th class="num">Hashrate</th>
         <th class="num">Best</th>
         <th class="num">Last seen</th>${adminCol}
-      </tr></thead><tbody>${rows}</tbody></table>`;
+      </tr></thead><tbody>${rows}${lockedRows}</tbody></table>`;
 
     // Mobile card layout
     const cards = workers.map(w => {
@@ -1423,7 +1763,7 @@
         ${actionsRow}
       </div>`;
     }).join('');
-    const cardList = `<div class="miner-cards">${cards}</div>`;
+    const cardList = `<div class="miner-cards">${cards}${lockedCards}</div>`;
 
     return table + cardList;
   }
@@ -1633,7 +1973,8 @@
       applyBestShareMode();
       document.getElementById('blocks-body').innerHTML = renderBlocks(data.blocks);
       checkBlockOverlay(data.blocks);
-      document.getElementById('miners-body').innerHTML = renderWorkers(data.workers);
+      document.getElementById('miners-body').innerHTML = renderWorkers(data.workers, data);
+      updateMinersTruncation(data);
       // Duck-O-Meter grid — only present if there are workers.
       const duckBody = document.getElementById('duck-o-meters-body');
       if (duckBody) {
