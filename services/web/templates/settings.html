@@ -944,7 +944,7 @@
                 <span class="row-pill dim">Default</span>
               {% endif %}
             </span>
-            <span class="row-summary">/ducky-pool/{% if settings.pro.coinbase_suffix %}{{ settings.pro.coinbase_suffix }}/{% endif %}</span>
+            <span class="row-summary">{% if settings.pro.coinbase_suffix %}/mined by {{ settings.pro.coinbase_suffix }} on Ducky Pool/{% else %}/mined on Ducky Pool/{% endif %}</span>
           </span>
           <span class="chevron" aria-hidden="true">▼</span>
         </header>
@@ -953,10 +953,11 @@
             <div class="note" style="margin-top: 0; border-color: var(--accent);">
               <span class="label" style="color: var(--accent);">Pro</span>
               Personalize the signature baked into blocks your pool finds.
-              On free tier, blocks are signed <span class="mono">/ducky-pool/</span>.
-              With Pro, you can add your own suffix:
-              <span class="mono">/ducky-pool/YourName/</span> — a permanent mark on the
-              blockchain that's yours forever.
+              On free tier, blocks are signed
+              <span class="mono">/mined on Ducky Pool/</span>.
+              With Pro, you can put your own name in:
+              <span class="mono">/mined by YourName on Ducky Pool/</span> —
+              a permanent mark on the blockchain that's yours forever.
               <br><br>
               <a href="#license">Activate Pro</a> to unlock.
             </div>
@@ -982,16 +983,28 @@
                    maxlength="20"
                    pattern="[A-Za-z0-9 _\-]*"
                    {% if not license.is_pro %}disabled placeholder="Pro feature — activate Pro to use"{% else %}placeholder="e.g. Ducky"{% endif %}>
-            <div class="field-help" style="display: flex; justify-content: space-between; gap: 0.5rem;">
-              <span id="sig-preview-wrap">
-                Block will be signed:
-                <span class="mono" style="color: var(--accent);" id="sig-preview">/ducky-pool/{{ settings.pro.coinbase_suffix }}{% if settings.pro.coinbase_suffix %}/{% endif %}</span>
-              </span>
-              {% if license.is_pro %}
+            {% if license.is_pro %}
+              <div class="field-help" style="display: flex; justify-content: flex-end; gap: 0.5rem;">
                 <span class="mono" style="color: var(--muted);" id="sig-counter">
                   {{ (settings.pro.coinbase_suffix|length) }} / 20
                 </span>
-              {% endif %}
+              </div>
+            {% endif %}
+          </div>
+
+          <!-- Live preview of what the next found block will be signed with. -->
+          <div style="margin-top: 1rem;">
+            <div style="font-size: 0.78rem; color: var(--muted); margin-bottom: 0.4rem; font-weight: 500;">
+              Preview · next block your pool finds will be signed:
+            </div>
+            <div style="background: var(--panel-soft); border: 1px solid var(--border); border-radius: 8px; padding: 0.85rem 1rem; font-family: ui-monospace, monospace; font-size: 0.92rem; color: var(--accent); word-break: break-all; line-height: 1.4;" id="sig-preview-wrap">
+              <span id="sig-preview">{% if settings.pro.coinbase_suffix %}/mined by {{ settings.pro.coinbase_suffix }} on Ducky Pool/{% else %}/mined on Ducky Pool/{% endif %}</span>
+            </div>
+            <div style="font-size: 0.74rem; color: var(--muted); margin-top: 0.5rem;">
+              In a block explorer's Scriptsig field this appears with a few binary
+              bytes before it (block height + extranonce — those look like
+              <span class="mono" style="color: var(--muted);">..i.T7.5...</span> dots and noise).
+              Your readable text always shows after.
             </div>
           </div>
         </div>
@@ -1661,7 +1674,9 @@
         input.value = cleaned;
         try { input.setSelectionRange(cursor, cursor); } catch (_) {}
       }
-      const sig = cleaned ? `/ducky-pool/${cleaned}/` : '/ducky-pool/';
+      const sig = cleaned
+        ? `/mined by ${cleaned} on Ducky Pool/`
+        : '/mined on Ducky Pool/';
       preview.textContent = sig;
       if (counter) counter.textContent = `${cleaned.length} / 20`;
     }
