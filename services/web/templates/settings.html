@@ -626,11 +626,33 @@
             </div>
           {% endif %}
 
-          <p class="help" style="margin-top: 0;">
-            <strong>Free tier active.</strong> You can mine up to {{ free_tier_max_miners }} workers.
-            Pro adds: unlimited miners, Discord webhooks, theme customization,
-            block found celebration overlay, and future Pro features.
-          </p>
+          <!-- Live tier usage -->
+          {% if license_rejected_names %}
+            <div class="note" style="margin-top: 0; border-color: var(--error, #ff6b6b); background: rgba(255,107,107,0.06);">
+              <span class="label" style="color: var(--error, #ff6b6b);">Rejecting now</span>
+              <strong>{{ license_workers_active }} of {{ free_tier_max_miners }} miner slots in use.</strong>
+              {{ license_rejected_names|length }} miner{{ 's' if license_rejected_names|length != 1 else '' }} currently being rejected from the pool:
+              <div style="margin-top: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.4rem;">
+                {% for name in license_rejected_names %}
+                  <span class="mono" style="padding: 0.2rem 0.55rem; background: rgba(255,107,107,0.12); border: 1px solid rgba(255,107,107,0.3); border-radius: 6px; font-size: 0.78rem;">🔒 {{ name }}</span>
+                {% endfor %}
+              </div>
+              <div class="flb-sub" style="margin-top: 0.5rem; font-size: 0.78rem; color: var(--muted);">
+                These miners can't submit shares until you upgrade. They'll keep retrying.
+              </div>
+            </div>
+          {% else %}
+            <p class="help" style="margin-top: 0;">
+              <strong>Free tier active.</strong>
+              {% if license_workers_total == 0 %}
+                No miners connected yet — you can run up to {{ free_tier_max_miners }} on free tier.
+              {% else %}
+                {{ license_workers_total }} of {{ free_tier_max_miners }} miner slots in use.
+              {% endif %}
+              Pro adds: unlimited miners, Discord webhooks, custom block signature, theme customization, and future features.
+            </p>
+          {% endif %}
+
           <p class="help" style="margin-top: 0.4rem;">
             Get a license: <strong>£35 one-time</strong> at
             <a href="{{ purchase_url }}" target="_blank" rel="noopener">{{ purchase_url }}</a>.

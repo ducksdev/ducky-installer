@@ -2686,6 +2686,7 @@ def _build_stats_payload(public: bool = False) -> dict:
     pro = is_pro()
     payload["is_pro_tier"] = pro
     payload["worker_cap"] = None if pro else FREE_TIER_MAX_MINERS
+    payload["rejected_workers"] = []
 
     if not pro and full_count > FREE_TIER_MAX_MINERS:
         sorted_workers = sorted(
@@ -2694,6 +2695,11 @@ def _build_stats_payload(public: bool = False) -> dict:
             reverse=True,
         )
         payload["workers"] = sorted_workers[:FREE_TIER_MAX_MINERS]
+        # The "rejected" workers carry their real name + last-known stats
+        # so the dashboard can show "you have a worker called X being
+        # rejected" rather than fake placeholder rows. These match
+        # exactly what the host-side enforcement is dropping.
+        payload["rejected_workers"] = sorted_workers[FREE_TIER_MAX_MINERS:]
         payload["workers_truncated"] = True
         payload["workers_total"] = full_count
         payload["workers_visible"] = FREE_TIER_MAX_MINERS
@@ -2764,6 +2770,7 @@ def index():
         status=payload["node"],
         pool=payload["pool"],
         workers=payload["workers"],
+        rejected_workers=payload.get("rejected_workers", []),
         workers_truncated=payload.get("workers_truncated", False),
         workers_total=payload.get("workers_total", 0),
         workers_visible=payload.get("workers_visible", 0),
@@ -2793,6 +2800,7 @@ def public_view():
         status=payload["node"],
         pool=payload["pool"],
         workers=payload["workers"],
+        rejected_workers=payload.get("rejected_workers", []),
         workers_truncated=payload.get("workers_truncated", False),
         workers_total=payload.get("workers_total", 0),
         workers_visible=payload.get("workers_visible", 0),
@@ -3068,6 +3076,22 @@ def settings_page():
             "flavor": t["flavor"],
             "color":  t["color"],
         })
+    # Live worker stats for the License card — show users their actual
+    # tier usage right where they decide whether to upgrade. Computed
+    # once per page-render; settings isn't a hot path.
+    all_workers = get_workers()
+    pro = is_pro()
+    rejected_names = []
+    if not pro and len(all_workers) > FREE_TIER_MAX_MINERS:
+        sorted_w = sorted(
+            all_workers,
+            key=lambda w: _hashrate_str_to_float(w.get("hashrate_1m") or "0H/s") or 0,
+            reverse=True,
+        )
+        rejected_names = [w.get("name", "") for w in sorted_w[FREE_TIER_MAX_MINERS:]]
+    license_workers_total = len(all_workers)
+    license_workers_active = min(license_workers_total, FREE_TIER_MAX_MINERS) if not pro else license_workers_total
+
     return render_template(
         "settings.html",
         settings=s,
@@ -3077,6 +3101,9 @@ def settings_page():
         min_share_h=humanise_diff(min_share_raw) if min_share_raw > 0 else "",
         tier_min_h=tier_min_h,
         default_tiers_json=json.dumps(default_tiers),
+        license_workers_total=license_workers_total,
+        license_workers_active=license_workers_active,
+        license_rejected_names=rejected_names,
     )
 
 
