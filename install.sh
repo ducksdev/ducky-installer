@@ -205,14 +205,21 @@ except Exception:
         coinbase_suffix=""
     fi
 
-    # Build the coinbase signature. Base prefix is always /ducky-pool/.
-    # If user has set a Pro suffix, append it: /ducky-pool/<suffix>/.
-    # Total stays well under ckpool's 96-byte coinbase scriptSig limit.
+    # Build the coinbase signature in the human-readable format
+    # "mined by NAME on Ducky Pool" (Pro) or "mined on Ducky Pool" (free).
+    # The contrast between the two strings IS the upgrade pitch — Pro
+    # users get their name permanently embedded in any block they find,
+    # free users get a generic pool credit.
+    #
+    # Wrapped in slashes per Bitcoin convention (BIP-22 / "client-id"
+    # style) so block explorers parse the signature cleanly. Total
+    # length stays well under ckpool's 96-byte coinbase scriptSig limit
+    # even with a max-length 20-char suffix.
     local pool_sig
     if [ -n "$coinbase_suffix" ]; then
-        pool_sig="/ducky-pool/${coinbase_suffix}/"
+        pool_sig="/mined by ${coinbase_suffix} on Ducky Pool/"
     else
-        pool_sig="/ducky-pool/"
+        pool_sig="/mined on Ducky Pool/"
     fi
 
     # Payout address. ckpool refuses to start without a valid address, so
@@ -557,9 +564,9 @@ except Exception:
     [ -z "\${payout:-}" ] && payout="1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
 
     if [ -n "\$coinbase_suffix" ]; then
-        pool_sig="/ducky-pool/\${coinbase_suffix}/"
+        pool_sig="/mined by \${coinbase_suffix} on Ducky Pool/"
     else
-        pool_sig="/ducky-pool/"
+        pool_sig="/mined on Ducky Pool/"
     fi
 
     local tmp="\$DATA_DIR_HOST/ckpool-config/ckpool.conf.tmp"
