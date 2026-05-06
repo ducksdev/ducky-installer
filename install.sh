@@ -181,15 +181,38 @@ render_ckpool_config() {
     # app rewrites settings.json and re-runs the render. On fresh install
     # there's no settings.json yet — defaults below match DEFAULT_SETTINGS
     # in app.py.
-    local mindiff maxdiff startdiff
+    local mindiff maxdiff startdiff coinbase_suffix
     if [ -f "$DATA_DIR/shared/settings.json" ]; then
         mindiff=$(python3 -c "import json,sys; print(json.load(open('$DATA_DIR/shared/settings.json')).get('mindiff', 1))" 2>/dev/null || echo 1)
         maxdiff=$(python3 -c "import json,sys; print(json.load(open('$DATA_DIR/shared/settings.json')).get('maxdiff', 0))" 2>/dev/null || echo 0)
         startdiff=$(python3 -c "import json,sys; print(json.load(open('$DATA_DIR/shared/settings.json')).get('startdiff', 1000))" 2>/dev/null || echo 1000)
+        # Pro coinbase suffix. Sanitised + length-limited at write time
+        # by the dashboard, but we re-clean here defensively. Strip
+        # newlines/quotes that would corrupt the JSON config.
+        coinbase_suffix=$(python3 -c "
+import json,sys,re
+try:
+    s = json.load(open('$DATA_DIR/shared/settings.json')).get('pro', {}).get('coinbase_suffix', '')
+    s = re.sub(r'[^A-Za-z0-9 _\\-]', '', str(s))[:20].strip()
+    print(s)
+except Exception:
+    print('')
+" 2>/dev/null || echo "")
     else
         mindiff=1
         maxdiff=0
         startdiff=1000
+        coinbase_suffix=""
+    fi
+
+    # Build the coinbase signature. Base prefix is always /ducky-pool/.
+    # If user has set a Pro suffix, append it: /ducky-pool/<suffix>/.
+    # Total stays well under ckpool's 96-byte coinbase scriptSig limit.
+    local pool_sig
+    if [ -n "$coinbase_suffix" ]; then
+        pool_sig="/ducky-pool/${coinbase_suffix}/"
+    else
+        pool_sig="/ducky-pool/"
     fi
 
     # Payout address. ckpool refuses to start without a valid address, so
@@ -220,7 +243,7 @@ render_ckpool_config() {
     BCH_RPC_PASS="$rpc_pass" \
     STRATUM_PORT="$STRATUM_PORT" \
     PAYOUT_ADDRESS="$payout" \
-    POOL_SIG="/ducky-pool/" \
+    POOL_SIG="$pool_sig" \
     MINDIFF="$mindiff" \
     MAXDIFF="$maxdiff" \
     STARTDIFF="$startdiff" \
@@ -510,19 +533,34 @@ mkdir -p "\$MARKER_DIR"
 # Re-render ckpool.conf from settings.json + payout.address. Mirrors
 # render_ckpool_config() in install.sh — keep in sync if you change one.
 render_ckpool_config() {
-    local rpc_pass mindiff maxdiff startdiff payout
+    local rpc_pass mindiff maxdiff startdiff payout coinbase_suffix pool_sig
     rpc_pass="\$(cat "\$DATA_DIR_HOST/rpc.pass")"
     if [ -f "\$DATA_DIR_HOST/shared/settings.json" ]; then
         mindiff=\$(python3 -c "import json; print(json.load(open('\$DATA_DIR_HOST/shared/settings.json')).get('mindiff', 1))" 2>/dev/null || echo 1)
         maxdiff=\$(python3 -c "import json; print(json.load(open('\$DATA_DIR_HOST/shared/settings.json')).get('maxdiff', 0))" 2>/dev/null || echo 0)
         startdiff=\$(python3 -c "import json; print(json.load(open('\$DATA_DIR_HOST/shared/settings.json')).get('startdiff', 1000))" 2>/dev/null || echo 1000)
+        coinbase_suffix=\$(python3 -c "
+import json,re
+try:
+    s = json.load(open('\$DATA_DIR_HOST/shared/settings.json')).get('pro', {}).get('coinbase_suffix', '')
+    s = re.sub(r'[^A-Za-z0-9 _\\-]', '', str(s))[:20].strip()
+    print(s)
+except Exception:
+    print('')
+" 2>/dev/null || echo "")
     else
-        mindiff=1; maxdiff=0; startdiff=1000
+        mindiff=1; maxdiff=0; startdiff=1000; coinbase_suffix=""
     fi
     if [ -f "\$DATA_DIR_HOST/shared/payout.address" ]; then
         payout="\$(cat "\$DATA_DIR_HOST/shared/payout.address" | head -n 1 | tr -d '[:space:]')"
     fi
     [ -z "\${payout:-}" ] && payout="1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+
+    if [ -n "\$coinbase_suffix" ]; then
+        pool_sig="/ducky-pool/\${coinbase_suffix}/"
+    else
+        pool_sig="/ducky-pool/"
+    fi
 
     local tmp="\$DATA_DIR_HOST/ckpool-config/ckpool.conf.tmp"
     local out="\$DATA_DIR_HOST/ckpool-config/ckpool.conf"
@@ -532,7 +570,7 @@ render_ckpool_config() {
     BCH_RPC_PASS="\$rpc_pass" \\
     STRATUM_PORT="\$STRATUM_PORT_HOST" \\
     PAYOUT_ADDRESS="\$payout" \\
-    POOL_SIG="/ducky-pool/" \\
+    POOL_SIG="\$pool_sig" \\
     MINDIFF="\$mindiff" \\
     MAXDIFF="\$maxdiff" \\
     STARTDIFF="\$startdiff" \\
@@ -540,7 +578,7 @@ render_ckpool_config() {
     if python3 -m json.tool < "\$tmp" >/dev/null 2>&1; then
         mv "\$tmp" "\$out"
         chmod 644 "\$out"
-        echo "[ducky-restart-watcher] re-rendered ckpool.conf (min=\$mindiff max=\$maxdiff start=\$startdiff)"
+        echo "[ducky-restart-watcher] re-rendered ckpool.conf (min=\$mindiff max=\$maxdiff start=\$startdiff sig=\$pool_sig)"
         return 0
     else
         rm -f "\$tmp"

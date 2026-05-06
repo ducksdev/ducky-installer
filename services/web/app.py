@@ -217,6 +217,18 @@ DEFAULT_SETTINGS = {
     "license": {
         "token": "",
     },
+    # Pro-only customizations. Saving these requires an active Pro license;
+    # the settings save handler refuses to update them on free tier.
+    # Stored regardless of current tier so the user can buy/cancel/rebuy
+    # without losing their config.
+    "pro": {
+        # Personal suffix appended to the coinbase signature (the human-
+        # readable string baked into blocks your pool finds). Becomes
+        # /ducky-pool/<suffix>/. Hard ceiling 20 chars so the combined
+        # signature fits in ckpool's 96-byte coinbase limit with room
+        # for the base prefix. Stripped to printable ASCII on save.
+        "coinbase_suffix": "",
+    },
 }
 
 ONLINE_SECONDS = 10 * 60
@@ -522,7 +534,7 @@ def _normalise_tiers(raw) -> list:
 
 def _merge_defaults(loaded: dict) -> dict:
     out = dict(DEFAULT_SETTINGS)
-    out.update({k: v for k, v in loaded.items() if k not in ("discord", "auth", "tiers", "license")})
+    out.update({k: v for k, v in loaded.items() if k not in ("discord", "auth", "tiers", "license", "pro")})
     discord = dict(DEFAULT_SETTINGS["discord"])
     discord.update(loaded.get("discord") or {})
     out["discord"] = discord
@@ -537,6 +549,9 @@ def _merge_defaults(loaded: dict) -> dict:
     license_dict = dict(DEFAULT_SETTINGS["license"])
     license_dict.update(loaded.get("license") or {})
     out["license"] = license_dict
+    pro = dict(DEFAULT_SETTINGS["pro"])
+    pro.update(loaded.get("pro") or {})
+    out["pro"] = pro
     out["tiers"] = _normalise_tiers(loaded.get("tiers"))
     return out
 
@@ -3139,6 +3154,18 @@ def settings_save():
             else:
                 new_auth["enabled"] = True
 
+    # Pro coinbase suffix. Pro-tier-only: free users can submit this
+    # via curl but it'll be silently dropped. Existing value is preserved
+    # across free-tier saves so a license lapse doesn't wipe customization.
+    raw_suffix = (request.form.get("coinbase_suffix") or "").strip()
+    if is_pro():
+        # Same regex as the install.sh sanitizer — kept in sync.
+        clean_suffix = re.sub(r"[^A-Za-z0-9 _\-]", "", raw_suffix)[:20].strip()
+        new_pro = {"coinbase_suffix": clean_suffix}
+    else:
+        # Free tier — keep whatever was there before.
+        new_pro = dict(s.get("pro", {}))
+
     if errors:
         for e in errors:
             flash(e, "error")
@@ -3156,6 +3183,7 @@ def settings_save():
         },
         "tiers": _normalise_tiers(tier_rows),
         "auth": new_auth,
+        "pro": new_pro,
     }
     save_settings(new)
 
@@ -3171,21 +3199,26 @@ def settings_save():
         new["maxdiff"]   != s["maxdiff"] or
         new["startdiff"] != s["startdiff"]
     )
+    suffix_changed = (
+        new["pro"].get("coinbase_suffix", "") != s.get("pro", {}).get("coinbase_suffix", "")
+    )
+    ckpool_config_changed = diff_changed or suffix_changed
     auth_changed = (
         new_auth.get("enabled") != s["auth"].get("enabled") or
         new_auth.get("password_hash") != s["auth"].get("password_hash")
     )
 
-    # When diff settings change, drop the marker so the host-side
-    # restart watcher re-renders ckpool.conf and bounces the container.
-    # Previously this was implicit because the old in-container entrypoint
-    # polled for config-hash changes; the new pre-built ckpool image has
-    # no such entrypoint, so the trigger has to be explicit.
-    if diff_changed:
+    # When ckpool.conf-relevant settings change (difficulty OR coinbase
+    # signature suffix), drop the marker so the host-side restart watcher
+    # re-renders ckpool.conf and bounces the container. Previously this
+    # was implicit because the old in-container entrypoint polled for
+    # config-hash changes; the new pre-built ckpool image has no such
+    # entrypoint, so the trigger has to be explicit.
+    if ckpool_config_changed:
         request_service_restart("ckpool")
 
     msgs = []
-    if diff_changed:
+    if ckpool_config_changed:
         msgs.append("ckpool will restart within ~10s — connected miners will reconnect automatically.")
     if auth_changed:
         if new_auth.get("enabled"):
