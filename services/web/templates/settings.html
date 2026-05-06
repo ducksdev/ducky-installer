@@ -777,6 +777,69 @@
         </div>
       </div>
 
+      <!-- Block signature (Pro feature) -->
+      <div class="card" data-card="block-sig" data-default-collapsed="true">
+        <header class="collapsible">
+          <h2>Block signature
+            {% if not license.is_pro %}
+              <span class="pill" style="background: rgba(249, 168, 37, 0.15); color: var(--accent);">Pro</span>
+            {% elif settings.pro.coinbase_suffix %}
+              <span class="pill ok">Custom</span>
+            {% else %}
+              <span class="pill dim">Default</span>
+            {% endif %}
+          </h2>
+          <span class="chevron">▼</span>
+        </header>
+        <div class="body">
+          {% if not license.is_pro %}
+            <div class="note" style="margin-top: 0; border-color: var(--accent);">
+              <span class="label" style="color: var(--accent);">Pro</span>
+              Personalize the signature baked into blocks your pool finds.
+              On free tier, blocks are signed <span class="mono">/ducky-pool/</span>.
+              With Pro, you can add your own suffix:
+              <span class="mono">/ducky-pool/YourName/</span> — a permanent mark on the
+              blockchain that's yours forever.
+              <br><br>
+              <a href="#license">Activate Pro</a> to unlock.
+            </div>
+          {% else %}
+            <p class="help" style="margin-top: 0;">
+              Add a personal suffix to the coinbase signature of any block your pool finds.
+              This text is permanently embedded in the blockchain — a small bit of immortality.
+              Saving this restarts ckpool (~10s, miners reconnect automatically).
+            </p>
+          {% endif %}
+
+          <div class="field" style="margin-top: 0.85rem;">
+            <label for="coinbase_suffix">
+              Suffix
+              {% if license.is_pro %}
+                <span style="font-weight: 400; color: var(--muted); font-size: 0.78rem;">
+                  — letters, numbers, space, dash, underscore. Max 20 chars.
+                </span>
+              {% endif %}
+            </label>
+            <input id="coinbase_suffix" name="coinbase_suffix" type="text"
+                   value="{{ settings.pro.coinbase_suffix }}"
+                   maxlength="20"
+                   pattern="[A-Za-z0-9 _\-]*"
+                   {% if not license.is_pro %}disabled placeholder="Pro feature — activate Pro to use"{% else %}placeholder="e.g. Ducky"{% endif %}>
+            <div class="field-help" style="display: flex; justify-content: space-between; gap: 0.5rem;">
+              <span id="sig-preview-wrap">
+                Block will be signed:
+                <span class="mono" style="color: var(--accent);" id="sig-preview">/ducky-pool/{{ settings.pro.coinbase_suffix }}{% if settings.pro.coinbase_suffix %}/{% endif %}</span>
+              </span>
+              {% if license.is_pro %}
+                <span class="mono" style="color: var(--muted);" id="sig-counter">
+                  {{ (settings.pro.coinbase_suffix|length) }} / 20
+                </span>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Discord (default expanded — most edited section) -->
       <div class="card" data-card="discord" data-default-collapsed="true">
         <header class="collapsible">
@@ -1361,6 +1424,33 @@
         DEFAULT_TIERS.forEach(t => list.appendChild(makeRow(t)));
       });
     }
+  })();
+
+  // ── Block signature live preview ───────────────────────────────
+  // Mirrors server-side sanitization (re.sub r'[^A-Za-z0-9 _\-]', max 20)
+  // so the preview always shows exactly what will be saved.
+  (function setupSigPreview() {
+    const input = document.getElementById('coinbase_suffix');
+    const preview = document.getElementById('sig-preview');
+    const counter = document.getElementById('sig-counter');
+    if (!input || !preview) return;
+    function update() {
+      const raw = input.value || '';
+      const cleaned = raw.replace(/[^A-Za-z0-9 _\-]/g, '').slice(0, 20).trim();
+      // If the user typed something we'd strip, sync the input back so
+      // they see the actual value going to the server.
+      if (cleaned !== raw && raw.length <= 20) {
+        // only repair if not actively pasting/over-length (avoid cursor jumps)
+        const cursor = input.selectionStart;
+        input.value = cleaned;
+        try { input.setSelectionRange(cursor, cursor); } catch (_) {}
+      }
+      const sig = cleaned ? `/ducky-pool/${cleaned}/` : '/ducky-pool/';
+      preview.textContent = sig;
+      if (counter) counter.textContent = `${cleaned.length} / 20`;
+    }
+    input.addEventListener('input', update);
+    update();
   })();
   </script>
 </body>
