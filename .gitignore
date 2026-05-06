@@ -1,1 +1,22 @@
-"scripts/" 
+# Dev tools — must not be in the public repo
+scripts/
+
+# Local state (server-side only, never commit)
+*.secret
+.env
+.env.local
+settings.json
+best_baselines.json
+seen_blocks.json
+history.db
+flask.secret
+install_meta.json
+payout.address
+
+# Python
+__pycache__/
+*.pyc
+
+# OS junk
+.DS_Store
+Thumbs.db
