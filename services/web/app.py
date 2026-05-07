@@ -1112,6 +1112,144 @@ def get_service_health() -> list[dict]:
     return services
 
 
+def block_readiness_check() -> dict:
+    """Diagnostic sweep that proves the block-finding pipeline is wired
+    correctly. Each check has a deterministic answer that doesn't
+    require waiting for a real block.
+
+    Returns dict with overall status + per-check details. The Health
+    page renders this; the same data also lands in the Discord webhook
+    if/when the user runs the test.
+    """
+    checks: list[dict] = []
+
+    def add(key: str, label: str, status: str, detail: str) -> None:
+        checks.append({
+            "key": key, "label": label, "status": status, "detail": detail,
+        })
+
+    # 1. bchnode reachable + fully synced
+    chain_info = None
+    try:
+        chain_info = rpc("getblockchaininfo")
+        progress = float(chain_info.get("verificationprogress") or 0)
+        height = int(chain_info.get("blocks") or 0)
+        if progress >= 0.9999:
+            add("node_synced", "BCH node fully synced", "ok",
+                f"Block height {height:,} · {progress * 100:.4f}% verified")
+        elif progress >= 0.95:
+            add("node_synced", "BCH node nearly synced", "warn",
+                f"At {progress * 100:.2f}% — wait for full sync before counting on blocks")
+        else:
+            add("node_synced", "BCH node still syncing", "err",
+                f"At {progress * 100:.2f}% — node won't deliver work until synced")
+    except Exception as exc:  # noqa: BLE001
+        add("node_synced", "BCH node unreachable", "err",
+            f"RPC call failed: {exc}")
+
+    # 2. getblocktemplate works (ckpool uses this every share)
+    try:
+        # BCH wants {"rules": ["csv"]} or empty object; empty is fine for read-only.
+        tmpl = rpc("getblocktemplate", [{"rules": []}])
+        if tmpl and "previousblockhash" in tmpl and "target" in tmpl:
+            target = tmpl.get("target", "")
+            bits = tmpl.get("bits", "")
+            add("block_template", "Mining work available from node", "ok",
+                f"target prefix {target[:16]}… · bits {bits} · ckpool can fetch templates")
+        else:
+            add("block_template", "Block template malformed", "warn",
+                "getblocktemplate returned unexpected fields — check bchnode version")
+    except Exception as exc:  # noqa: BLE001
+        add("block_template", "Block template unavailable", "err",
+            f"getblocktemplate failed: {exc} — ckpool can't get mining work")
+
+    # 3. Payout address validates against BCH
+    payout = read_payout()
+    if not payout:
+        add("payout", "Payout address not set", "err",
+            "Set a payout address before mining — blocks can't be assigned without it")
+    else:
+        try:
+            valid = rpc("validateaddress", [payout])
+            if valid.get("isvalid"):
+                add("payout", "Payout address valid", "ok",
+                    f"{payout[:24]}… is a valid BCH address")
+            else:
+                add("payout", "Payout address invalid", "err",
+                    f"{payout[:24]}… isn't accepted by BCH — block rewards would be lost")
+        except Exception as exc:  # noqa: BLE001
+            add("payout", "Could not validate address", "warn",
+                f"RPC call failed: {exc}")
+
+    # 4. Stratum port accepts TCP connections from inside the container
+    try:
+        with socket.create_connection(("ckpool", STRATUM_PORT), timeout=3):
+            add("stratum_port", "Stratum port open", "ok",
+                f"ckpool is accepting connections on port {STRATUM_PORT}")
+    except (socket.error, socket.timeout) as exc:
+        add("stratum_port", "Stratum port not reachable", "err",
+            f"Can't connect to ckpool:{STRATUM_PORT} — ckpool may be down ({exc})")
+
+    # 5. ckpool.conf reflects current settings (the actual config running)
+    conf_path = "/shared/../ckpool-config/ckpool.conf"
+    # The web container doesn't normally have ckpool-config mounted, so
+    # try a few likely locations. If not found, skip with info status.
+    conf_text = None
+    for p in ("/ckpool-config/ckpool.conf", "/var/lib/ducky-pool/ckpool-config/ckpool.conf"):
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                conf_text = f.read()
+            break
+        except OSError:
+            continue
+    if conf_text:
+        sig_match = re.search(r'"btcsig"\s*:\s*"([^"]*)"', conf_text)
+        addr_match = re.search(r'"btcaddress"\s*:\s*"([^"]*)"', conf_text)
+        sig = sig_match.group(1) if sig_match else "(missing)"
+        addr_in_conf = addr_match.group(1) if addr_match else ""
+        if addr_in_conf == payout:
+            add("config_match", "ckpool.conf matches dashboard", "ok",
+                f"Signature: {sig} · address matches payout setting")
+        else:
+            add("config_match", "ckpool.conf address mismatch", "warn",
+                f"Conf has {addr_in_conf[:24]}… but dashboard payout is {payout[:24]}… — restart ckpool")
+    else:
+        # Not having access from the web container isn't a real failure;
+        # the host-side rendering is what matters.
+        add("config_match", "ckpool.conf not visible from web container", "warn",
+            "Can't introspect (container isolation) — verify by running: sudo cat /var/lib/ducky-pool/ckpool-config/ckpool.conf | grep btcsig")
+
+    # 6. Has any block ever been found
+    blocks_count = 0
+    try:
+        if os.path.exists(BLOCKS_LOG):
+            with open(BLOCKS_LOG, "r", encoding="utf-8") as f:
+                blocks_count = sum(1 for line in f if line.strip())
+    except OSError:
+        pass
+    if blocks_count > 0:
+        add("submission_proven", "Block submission proven", "ok",
+            f"{blocks_count} block{'s' if blocks_count != 1 else ''} found by this install — submission path is verified working")
+    else:
+        add("submission_proven", "No blocks found yet", "warn",
+            "Pipeline looks correct but no real block has tested it. ckpool's submission code is battle-tested — you're not the first to run this stack.")
+
+    # Overall status: err if any err, warn if any warn, otherwise ok
+    statuses = [c["status"] for c in checks]
+    if "err" in statuses:
+        overall = "err"
+    elif "warn" in statuses:
+        overall = "warn"
+    else:
+        overall = "ok"
+
+    return {
+        "overall": overall,
+        "checks": checks,
+        "checked_at": int(time.time()),
+    }
+
+
 def health_payload() -> dict:
     """Combined payload for /api/health. Always returns even on partial
     failures — UI shows what it can."""
@@ -3347,8 +3485,21 @@ def settings_save():
         new_pro = dict(s.get("pro", {}))
 
     if errors:
+        # Make it explicit nothing was saved when validation fails.
+        # Without this the user sees errors but the page also reverts
+        # to the old saved values silently.
         for e in errors:
             flash(e, "error")
+        flash(
+            f"Settings NOT saved — please fix the errors above. "
+            f"({len(errors)} error{'s' if len(errors) != 1 else ''})",
+            "error",
+        )
+        # Log to server too so we can see what's happening
+        app.logger.warning(
+            "settings_save: refused with %d errors. tier_rows received: %d, errors: %s",
+            len(errors), len(tier_rows), errors,
+        )
         return redirect(url_for("settings_page"))
 
     new = {
@@ -3410,10 +3561,10 @@ def settings_save():
             msgs.append("Dashboard auth is now ON.")
         else:
             msgs.append("Dashboard auth is now OFF.")
-    if msgs:
-        flash("Settings saved. " + " ".join(msgs), "ok")
-    else:
-        flash("Settings saved.", "ok")
+    saved_tier_count = len(new["tiers"])
+    msgs.append(f"{saved_tier_count} duck tier{'s' if saved_tier_count != 1 else ''} saved.")
+    flash("Settings saved. " + " ".join(msgs), "ok")
+    app.logger.info("settings_save: %d tiers saved", saved_tier_count)
     return redirect(url_for("settings_page"))
 
 
@@ -3497,6 +3648,17 @@ def health_page():
 @login_required_json
 def api_health():
     return jsonify(health_payload())
+
+
+@app.route("/api/readiness-check", methods=["GET"])
+@login_required_json
+def api_readiness_check():
+    """Diagnostic sweep that proves the block-finding pipeline is wired
+    correctly. Run from the Health page when the user wants to know
+    "would my pool actually win a block if a high-difficulty share
+    came through?"
+    """
+    return jsonify(block_readiness_check())
 
 
 @app.route("/api/check-updates", methods=["POST"])

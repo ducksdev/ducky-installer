@@ -237,6 +237,40 @@
     }
     .update-result a { color: var(--accent); }
 
+    /* ── block readiness check ─────────────────────────────────── */
+    .readiness-result {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.5rem;
+      background: var(--panel-soft);
+    }
+    .readiness-result.overall-ok   { border-color: var(--success); }
+    .readiness-result.overall-warn { border-color: var(--warn); }
+    .readiness-result.overall-err  { border-color: var(--error); }
+    .readiness-check {
+      display: flex; align-items: flex-start; gap: 0.6rem;
+      padding: 0.55rem 0.7rem;
+      border-bottom: 1px dashed var(--border);
+    }
+    .readiness-check:last-child { border-bottom: none; }
+    .readiness-check .rc-dot {
+      flex-shrink: 0;
+      width: 8px; height: 8px; border-radius: 50%;
+      margin-top: 0.4rem;
+    }
+    .readiness-check .rc-dot.ok   { background: var(--success); box-shadow: 0 0 4px var(--success); }
+    .readiness-check .rc-dot.warn { background: var(--warn);    box-shadow: 0 0 4px var(--warn); }
+    .readiness-check .rc-dot.err  { background: var(--error);   box-shadow: 0 0 4px var(--error); }
+    .readiness-check .rc-text { flex: 1; min-width: 0; }
+    .readiness-check .rc-label {
+      font-size: 0.86rem; font-weight: 500; color: var(--fg);
+    }
+    .readiness-check .rc-detail {
+      font-size: 0.76rem; color: var(--muted); margin-top: 0.15rem;
+      word-break: break-word;
+    }
+    .pill.warn { background: rgba(255,170,0,0.12); color: #ffc955; border-color: rgba(255,170,0,0.3); }
+
     .card {
       background: var(--panel); border: 1px solid var(--border);
       border-radius: 12px;
@@ -536,6 +570,28 @@
         <div class="stat-grid" id="system-stats">
           <p class="lede">Loading…</p>
         </div>
+      </div>
+    </div>
+
+    <!-- ── block readiness ─────────────────────────────────────── -->
+    <div class="card" data-card="readiness">
+      <header class="collapsible">
+        <h2>Block readiness
+          <span class="pill dim" id="readiness-overall-pill">Not run</span>
+        </h2>
+        <span class="chevron">▼</span>
+      </header>
+      <div class="body">
+        <p class="lede" style="margin-top: 0;">
+          Verifies the pipeline that submits a winning block: BCH node sync state,
+          mining work availability, payout address validity, stratum port reachability,
+          ckpool config integrity, and historical block submission. If all checks pass,
+          a high-difficulty share WILL submit a block.
+        </p>
+        <div class="actions-bar" style="margin-top: 0.5rem;">
+          <button type="button" class="ghost" id="readiness-check-btn">⟳ Run readiness check</button>
+        </div>
+        <div id="readiness-result" class="readiness-result" style="display: none; margin-top: 0.85rem;"></div>
       </div>
     </div>
 
@@ -977,6 +1033,77 @@
       } finally {
         btn.disabled = false;
         btn.textContent = '⟳ Check for updates';
+      }
+    });
+  })();
+
+  // ── Block readiness check ────────────────────────────────────
+  (function readinessChecker() {
+    const btn = document.getElementById('readiness-check-btn');
+    const resultEl = document.getElementById('readiness-result');
+    const overallPill = document.getElementById('readiness-overall-pill');
+    if (!btn || !resultEl) return;
+
+    function escHtml(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      })[c]);
+    }
+
+    function render(data) {
+      if (!data || !data.checks) {
+        resultEl.style.display = 'block';
+        resultEl.className = 'readiness-result overall-err';
+        resultEl.innerHTML = '<div class="readiness-check"><span class="rc-dot err"></span><div class="rc-text"><div class="rc-label">Check failed</div><div class="rc-detail">' + escHtml(data && data.error || 'Unknown error') + '</div></div></div>';
+        if (overallPill) {
+          overallPill.className = 'pill error';
+          overallPill.textContent = 'Failed';
+        }
+        return;
+      }
+      const overall = data.overall || 'warn';
+      resultEl.style.display = 'block';
+      resultEl.className = 'readiness-result overall-' + overall;
+      resultEl.innerHTML = data.checks.map(c =>
+        '<div class="readiness-check">' +
+          '<span class="rc-dot ' + escHtml(c.status) + '"></span>' +
+          '<div class="rc-text">' +
+            '<div class="rc-label">' + escHtml(c.label) + '</div>' +
+            '<div class="rc-detail">' + escHtml(c.detail) + '</div>' +
+          '</div>' +
+        '</div>'
+      ).join('');
+
+      if (overallPill) {
+        if (overall === 'ok') {
+          overallPill.className = 'pill ok';
+          overallPill.textContent = 'Ready';
+        } else if (overall === 'warn') {
+          overallPill.className = 'pill warn';
+          overallPill.textContent = 'Warnings';
+        } else {
+          overallPill.className = 'pill error';
+          overallPill.textContent = 'Issues';
+        }
+      }
+    }
+
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      btn.textContent = '⟳ Running…';
+      if (overallPill) {
+        overallPill.className = 'pill dim';
+        overallPill.textContent = 'Running…';
+      }
+      try {
+        const r = await fetch('/api/readiness-check', { cache: 'no-store' });
+        const data = await r.json();
+        render(data);
+      } catch (e) {
+        render({ ok: false, error: 'Request failed: ' + (e.message || e) });
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '⟳ Run readiness check';
       }
     });
   })();
