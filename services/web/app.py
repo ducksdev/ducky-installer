@@ -172,6 +172,12 @@ DEFAULT_SETTINGS = {
     "mindiff": 1,
     "maxdiff": 0,        # 0 = unlimited
     "startdiff": 1000,
+    # Auto-hide miners that have been offline for this many hours. Set to
+    # 0 to disable (manual hide only). 24h is the default — long enough
+    # that overnight outages don't disappear miners, short enough that
+    # truly abandoned ones get cleaned up. Auto-unhides when the worker
+    # submits a new share (same as manual Hide).
+    "auto_hide_offline_hours": 24,
     "discord": {
         "webhook_url": "",
         "username": "Ducky Pool",
@@ -2521,6 +2527,65 @@ def _clear_drop_marker() -> None:
         app.logger.warning("could not remove drop marker: %s", exc)
 
 
+def _auto_hide_offline_workers() -> None:
+    """Auto-hide miners that have been offline longer than the configured
+    threshold. Threshold 0 = disabled. Same mechanism as manual Hide:
+    write to baselines["hidden"] with a share-count snapshot, so the
+    worker auto-resurfaces if it submits a new share later.
+
+    Cheap on every tick — only walks the workers list (in memory) and
+    only acquires the state lock when there's something new to hide.
+    """
+    try:
+        s = load_settings()
+        threshold_hours = int(s.get("auto_hide_offline_hours") or 0)
+        if threshold_hours <= 0:
+            return  # disabled
+        threshold_seconds = threshold_hours * 3600
+
+        workers = get_workers()
+        now = int(time.time())
+        to_hide: list[tuple[str, int]] = []  # (worker_id, current_shares)
+        for w in workers:
+            age = w.get("age_s")
+            if age is None or age < threshold_seconds:
+                continue
+            wid = w.get("id") or w.get("name")
+            if not wid:
+                continue
+            shares = int(w.get("shares") or 0)
+            to_hide.append((wid, shares))
+
+        if not to_hide:
+            return
+
+        with _state_lock:
+            state = _load_baselines()
+            hidden = state.setdefault("hidden", {})
+            changed = False
+            for wid, shares in to_hide:
+                if wid in hidden:
+                    continue  # already hidden manually or by previous tick
+                # Drop baseline so a returning worker is treated as fresh
+                # (mirrors the manual Hide behaviour).
+                state.get("workers", {}).pop(wid, None)
+                hidden[wid] = {
+                    "ts": now,
+                    "shares": shares,
+                    "auto": True,  # marker so we know this was automatic
+                }
+                changed = True
+            if changed:
+                _save_baselines(state)
+                app.logger.info(
+                    "auto-hide: hid %d offline worker(s) (threshold %dh)",
+                    len([w for w in to_hide if w[0] in hidden]),
+                    threshold_hours,
+                )
+    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("auto-hide failed: %s", exc)
+
+
 def _watcher_loop() -> None:
     global _last_history_ts
     while True:
@@ -2537,6 +2602,10 @@ def _watcher_loop() -> None:
             _update_worker_cap_enforcement()
         except Exception as exc:  # noqa: BLE001
             app.logger.exception("worker cap watcher tick failed: %s", exc)
+        try:
+            _auto_hide_offline_workers()
+        except Exception as exc:  # noqa: BLE001
+            app.logger.exception("auto-hide watcher tick failed: %s", exc)
         # Record a history sample on its own cadence (every minute by default)
         if now - _last_history_ts >= HISTORY_SAMPLE_INTERVAL:
             try:
@@ -3139,6 +3208,19 @@ def settings_save():
     avatar_url = (request.form.get("avatar_url") or "").strip()
     if avatar_url and not avatar_url.startswith(("http://", "https://")):
         errors.append("Avatar URL must start with http:// or https://")
+
+    # Auto-hide threshold (hours). 0 = disabled. Capped at 720h (30 days)
+    # to keep the dropdown reasonable. If the field is missing or unparseable
+    # we keep whatever was previously set rather than silently resetting to
+    # default — same defensive pattern as the license token carry-through.
+    auto_hide_raw = (request.form.get("auto_hide_offline_hours") or "").strip()
+    if auto_hide_raw == "":
+        auto_hide_hours = int(s.get("auto_hide_offline_hours", 24) or 0)
+    else:
+        try:
+            auto_hide_hours = max(0, min(720, int(auto_hide_raw)))
+        except ValueError:
+            auto_hide_hours = int(s.get("auto_hide_offline_hours", 24) or 0)
     if avatar_url and len(avatar_url) > 500:
         errors.append("Avatar URL is too long.")
 
@@ -3273,6 +3355,7 @@ def settings_save():
         "mindiff": int(mindiff or 1),
         "maxdiff": int(maxdiff or 0),
         "startdiff": int(startdiff or 1),
+        "auto_hide_offline_hours": int(auto_hide_hours),
         "discord": {
             "webhook_url": webhook_url,
             "username": username,

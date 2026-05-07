@@ -800,7 +800,12 @@ RestartSec=5s
 WantedBy=multi-user.target
 UNIT
     systemctl daemon-reload
-    systemctl enable --now ducky-restart-watcher.service
+    systemctl enable ducky-restart-watcher.service
+    # Restart explicitly — `enable --now` only starts a stopped service,
+    # leaving an old version running on re-installs. The watcher is
+    # safe to bounce: it's stateless, holds no connections, and any
+    # in-flight marker file will be re-processed on the next tick.
+    systemctl restart ducky-restart-watcher.service
     ok "Restart watcher installed and running"
 }
 

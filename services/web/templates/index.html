@@ -1209,6 +1209,15 @@
                         <div>Best<br><span class="v">{{ w.best_share }}</span></div>
                         <div>Seen<br><span class="v">{{ w.age_human }}</span></div>
                       </div>
+                      {% if not public %}
+                        <div class="actions-row">
+                          <form method="post" action="{{ url_for('forget_worker') }}" style="display: inline;"
+                                onsubmit="return confirm('Hide worker {{ w.name }}?\n\nThe worker will disappear from the dashboard. It auto-reappears if it submits a new share. Miner stays connected, no blip.');">
+                            <input type="hidden" name="name" value="{{ w.id }}">
+                            <button type="submit" class="ghost" title="Hide from dashboard">Hide</button>
+                          </form>
+                        </div>
+                      {% endif %}
                     </div>
                   {% endfor %}
                   {% if rejected_workers %}
