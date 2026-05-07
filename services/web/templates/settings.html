@@ -1698,6 +1698,36 @@
         DEFAULT_TIERS.forEach(t => list.appendChild(makeRow(t)));
       });
     }
+
+    // Diagnostic — log what we're about to submit. Open browser DevTools
+    // (F12 → Console) before clicking Save to see exactly what tiers are
+    // being sent. This catches the most common cause of "tier disappeared"
+    // bugs: the browser silently dropped a row whose label was blank,
+    // or the JS clone didn't wire up the inputs correctly.
+    const settingsForm = list.closest('form');
+    if (settingsForm) {
+      settingsForm.addEventListener('submit', (e) => {
+        const fd = new FormData(settingsForm);
+        const labels = fd.getAll('tier_label');
+        const mins = fd.getAll('tier_min');
+        console.log('[ducky-settings] submitting', labels.length, 'tiers');
+        labels.forEach((lbl, i) => {
+          console.log(`  [${i}] label=${JSON.stringify(lbl)}, min=${JSON.stringify(mins[i])}`);
+        });
+        // Catch the most common silent-drop case: a row with an empty
+        // label. The browser's `required` check should catch this, but
+        // some browsers/extensions skip dynamically-added inputs.
+        const blankIdx = labels.findIndex(l => !String(l).trim());
+        if (blankIdx >= 0) {
+          e.preventDefault();
+          alert(
+            'Tier #' + (blankIdx + 1) + ' has no label — fill it in or click × to remove it.\n\n' +
+            'Empty tiers would be silently dropped on save.'
+          );
+          return false;
+        }
+      });
+    }
   })();
 
   // ── Block signature live preview ───────────────────────────────

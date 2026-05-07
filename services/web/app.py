@@ -3389,6 +3389,27 @@ def settings_save():
     raw_labels  = request.form.getlist("tier_label")
     raw_flavors = request.form.getlist("tier_flavor")
     raw_colors  = request.form.getlist("tier_color")
+
+    # Server-side diagnostic so we can debug "tier disappeared" reports.
+    # These get logged regardless of outcome so we can correlate "user
+    # added X but only saw Y saved" against the actual form payload.
+    app.logger.info(
+        "settings_save: received tier arrays — mins=%d emojis=%d labels=%d flavors=%d colors=%d",
+        len(raw_mins), len(raw_emojis), len(raw_labels),
+        len(raw_flavors), len(raw_colors),
+    )
+    # If the parallel arrays don't all have the same length, the JS clone
+    # produced a malformed row (some input lost its `name=`). Warn the
+    # user clearly instead of silently shifting the per-row data.
+    expected_len = len(raw_mins)
+    if not all(len(arr) == expected_len for arr in
+               (raw_emojis, raw_labels, raw_flavors, raw_colors)):
+        errors.append(
+            "Tier rows look malformed (mismatched field counts). "
+            "Try refreshing the page and re-adding any new tiers, "
+            "or check the browser console for JS errors."
+        )
+
     tier_rows = []
     for i, raw_min in enumerate(raw_mins):
         raw_min = (raw_min or "").strip()
