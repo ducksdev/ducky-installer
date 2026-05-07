@@ -43,6 +43,7 @@ from flask import (
     jsonify,
     abort,
     session,
+    make_response,
 )
 
 app = Flask(__name__)
@@ -3299,7 +3300,7 @@ def settings_page():
     license_workers_total = len(all_workers)
     license_workers_active = min(license_workers_total, FREE_TIER_MAX_MINERS) if not pro else license_workers_total
 
-    return render_template(
+    response = make_response(render_template(
         "settings.html",
         settings=s,
         mindiff_h=humanise_diff(s["mindiff"]) if s["mindiff"] else "1",
@@ -3311,7 +3312,13 @@ def settings_page():
         license_workers_total=license_workers_total,
         license_workers_active=license_workers_active,
         license_rejected_names=rejected_names,
-    )
+    ))
+    # Force fresh fetch so the inlined JS picks up code changes the
+    # moment the user upgrades. Settings isn't a hot path; cache savings
+    # would be negligible compared to the support cost of "stale page".
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    return response
 
 
 @app.route("/settings/save", methods=["POST"])
@@ -3394,9 +3401,17 @@ def settings_save():
     # These get logged regardless of outcome so we can correlate "user
     # added X but only saw Y saved" against the actual form payload.
     app.logger.info(
-        "settings_save: received tier arrays — mins=%d emojis=%d labels=%d flavors=%d colors=%d",
+        "settings_save: received tier arrays — mins=%d emojis=%d labels=%d flavors=%d colors=%d. "
+        "labels=%r mins=%r",
         len(raw_mins), len(raw_emojis), len(raw_labels),
         len(raw_flavors), len(raw_colors),
+        raw_labels, raw_mins,
+    )
+    # Also log all form keys we received so we can spot if our names got
+    # mangled by some middleware (e.g. tier_label vs tier-label).
+    app.logger.info(
+        "settings_save: all form keys: %r",
+        sorted(set(request.form.keys())),
     )
     # If the parallel arrays don't all have the same length, the JS clone
     # produced a malformed row (some input lost its `name=`). Warn the

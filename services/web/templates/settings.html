@@ -783,11 +783,11 @@
     </div>
     </div><!-- /settings-section: Account -->
 
+    <form method="post" action="{{ url_for('settings_save') }}" autocomplete="off">
+
     <!-- ── Section: Pool ───────────────────────────────────────── -->
     <div class="settings-section">
       <h3 class="settings-section-label">Pool</h3>
-
-    <form method="post" action="{{ url_for('settings_save') }}" autocomplete="off">
 
       <!-- Stratum difficulty (default collapsed — set once, ignore) -->
       <div class="card" data-card="stratum-diff" data-default-collapsed="true">
@@ -1633,10 +1633,9 @@
   // ── Tier editor — add/remove/reset ───────────────────────────
   (function() {
     const list = document.getElementById('tier-rows');
-    const tpl  = document.getElementById('tier-row-template');
     const addBtn   = document.getElementById('tier-add');
     const resetBtn = document.getElementById('tier-reset');
-    if (!list || !tpl || !addBtn) return;
+    if (!list || !addBtn) return;
 
     // Default tier list lives server-side too — embedded here so the
     // Reset button works without a round-trip. Keep this in sync with
@@ -1676,14 +1675,99 @@
     }
 
     function makeRow(t) {
-      const node = tpl.content.firstElementChild.cloneNode(true);
-      node.querySelector('input[name="tier_min"]').value    = (t && t.min_h) || '';
-      node.querySelector('input[name="tier_emoji"]').value  = (t && t.emoji) || '🦆';
-      node.querySelector('input[name="tier_label"]').value  = (t && t.label) || '';
-      node.querySelector('input[name="tier_flavor"]').value = (t && t.flavor) || '';
-      node.querySelector('input[name="tier_color"]').value  = (t && t.color) || '';
-      bindRow(node);
-      return node;
+      // Build the row element imperatively rather than cloning a
+      // <template>. The cloning approach was reportedly losing inputs
+      // in some browser/extension combinations — this version is
+      // straightforward DOM creation with no template indirection.
+      t = t || {};
+
+      const row = document.createElement('div');
+      row.className = 'tier-row';
+
+      const fields = document.createElement('div');
+      fields.className = 'tier-fields';
+      row.appendChild(fields);
+
+      function makeField(klass, labelText, inputBuilder) {
+        const label = document.createElement('label');
+        label.className = 'tier-field ' + klass;
+        const span = document.createElement('span');
+        span.className = 'tier-label-text';
+        span.textContent = labelText;
+        label.appendChild(span);
+        const input = inputBuilder();
+        label.appendChild(input);
+        fields.appendChild(label);
+        return input;
+      }
+
+      // Threshold ≥
+      makeField('tier-min', 'Threshold ≥', () => {
+        const i = document.createElement('input');
+        i.type = 'text'; i.name = 'tier_min';
+        i.value = t.min_h || '';
+        i.placeholder = '0';
+        return i;
+      });
+      // Emoji
+      makeField('tier-emoji', 'Emoji', () => {
+        const i = document.createElement('input');
+        i.type = 'text'; i.name = 'tier_emoji';
+        i.value = t.emoji || '🦆';
+        i.maxLength = 8;
+        return i;
+      });
+      // Label  (NOT marked required — we validate server-side and warn
+      // in the submit handler instead, so dynamically-added rows don't
+      // trip browser validation oddities)
+      makeField('tier-label-input', 'Label', () => {
+        const i = document.createElement('input');
+        i.type = 'text'; i.name = 'tier_label';
+        i.value = t.label || '';
+        i.maxLength = 40;
+        return i;
+      });
+      // Flavor
+      makeField('tier-flavor', 'Flavor message', () => {
+        const i = document.createElement('input');
+        i.type = 'text'; i.name = 'tier_flavor';
+        i.value = t.flavor || '';
+        i.maxLength = 120;
+        return i;
+      });
+      // Color combo (swatch + hex text)
+      const colorLabel = document.createElement('label');
+      colorLabel.className = 'tier-field tier-color';
+      const colorSpan = document.createElement('span');
+      colorSpan.className = 'tier-label-text';
+      colorSpan.textContent = 'Color';
+      colorLabel.appendChild(colorSpan);
+      const colorCombo = document.createElement('div');
+      colorCombo.className = 'tier-color-combo';
+      const swatch = document.createElement('input');
+      swatch.type = 'color'; swatch.className = 'tier-color-swatch';
+      swatch.value = '#' + (t.color || '5b6675');
+      swatch.setAttribute('aria-label', 'Pick color');
+      colorCombo.appendChild(swatch);
+      const hexInput = document.createElement('input');
+      hexInput.type = 'text'; hexInput.name = 'tier_color';
+      hexInput.value = t.color || '';
+      hexInput.maxLength = 6;
+      hexInput.placeholder = '5b8aa6';
+      colorCombo.appendChild(hexInput);
+      colorLabel.appendChild(colorCombo);
+      fields.appendChild(colorLabel);
+
+      // Remove button
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'ghost tier-remove';
+      removeBtn.title = 'Remove tier';
+      removeBtn.textContent = '×';
+      row.appendChild(removeBtn);
+
+      bindRow(row);
+      return row;
     }
 
     // Bind existing server-rendered rows
