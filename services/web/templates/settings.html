@@ -1009,6 +1009,51 @@
           </div>
         </div>
       </div>
+      <!-- Auto-hide offline workers -->
+      <div class="card" data-card="auto-hide" data-default-collapsed="true">
+        <header class="collapsible">
+          <span class="row-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.585 10.587a2 2 0 0 0 2.829 2.828"/><path d="M16.681 16.673a8.717 8.717 0 0 1 -4.681 1.327c-3.6 0 -6.6 -2 -9 -6c1.272 -2.12 2.712 -3.678 4.32 -4.674m2.86 -1.146a9.055 9.055 0 0 1 1.82 -.18c3.6 0 6.6 2 9 6c-.666 1.11 -1.379 2.067 -2.138 2.87"/><path d="M3 3l18 18"/></svg>
+          </span>
+          <span class="row-main">
+            <span class="row-title">Auto-hide offline</span>
+            <span class="row-summary prose">
+              {% if settings.auto_hide_offline_hours and settings.auto_hide_offline_hours > 0 %}
+                {% if settings.auto_hide_offline_hours == 1 %}After 1 hour offline
+                {% elif settings.auto_hide_offline_hours < 24 %}After {{ settings.auto_hide_offline_hours }} hours offline
+                {% elif settings.auto_hide_offline_hours == 24 %}After 24 hours offline (default)
+                {% elif settings.auto_hide_offline_hours < 168 %}After {{ (settings.auto_hide_offline_hours / 24)|round|int }} days offline
+                {% else %}After {{ (settings.auto_hide_offline_hours / 168)|round|int }} week{{ 's' if settings.auto_hide_offline_hours >= 336 else '' }} offline{% endif %}
+              {% else %}
+                <span class="dim">Disabled · manual hide only</span>
+              {% endif %}
+            </span>
+          </span>
+          <span class="chevron" aria-hidden="true">▼</span>
+        </header>
+        <div class="body">
+          <p class="help" style="margin-top: 0;">
+            Tidies the Miners list by auto-hiding workers that haven't reported in a while. Hidden
+            miners keep coming back automatically as soon as they submit a new share — no permanent loss.
+          </p>
+          <div class="field" style="margin-bottom: 0;">
+            <label for="auto_hide_offline_hours">Hide after</label>
+            <select id="auto_hide_offline_hours" name="auto_hide_offline_hours">
+              <option value="0" {{ 'selected' if (settings.auto_hide_offline_hours or 0) == 0 else '' }}>Disabled — manual only</option>
+              <option value="1" {{ 'selected' if settings.auto_hide_offline_hours == 1 else '' }}>1 hour</option>
+              <option value="6" {{ 'selected' if settings.auto_hide_offline_hours == 6 else '' }}>6 hours</option>
+              <option value="24" {{ 'selected' if (settings.auto_hide_offline_hours or 24) == 24 else '' }}>24 hours (default)</option>
+              <option value="72" {{ 'selected' if settings.auto_hide_offline_hours == 72 else '' }}>3 days</option>
+              <option value="168" {{ 'selected' if settings.auto_hide_offline_hours == 168 else '' }}>1 week</option>
+              <option value="720" {{ 'selected' if settings.auto_hide_offline_hours == 720 else '' }}>30 days</option>
+            </select>
+            <div class="field-help">
+              Threshold uses the worker's last share timestamp. The auto-hide check runs every {{ 10 }} seconds.
+            </div>
+          </div>
+        </div>
+      </div>
+
     </div><!-- /settings-section: Pool -->
 
     <!-- ── Section: Notifications ──────────────────────────────── -->
