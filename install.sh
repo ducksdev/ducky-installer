@@ -30,19 +30,6 @@ WEB_PORT="${WEB_PORT:-4568}"
 P2P_PORT="${P2P_PORT:-8333}"
 BCHN_IMAGE="${BCHN_IMAGE:-zquestz/bitcoin-cash-node:latest}"
 
-# License signing secret. This is intentionally a fixed string in the
-# distribution: license tokens minted with this secret (via the
-# scripts/issue_license.py tool) will validate on every install that
-# uses the same install.sh. Rotating this string in a future release
-# invalidates ALL outstanding tokens, which is the revocation
-# mechanism if a leak occurs.
-#
-# The secret being committed to the public repo is fine for our
-# honor-system license model: HMAC just prevents trivial forging,
-# enforcement is legal/contractual not cryptographic. Anyone running
-# their own fork should generate their own secret and update this line.
-DUCKY_LICENSE_SECRET="${DUCKY_LICENSE_SECRET:-yiavWbjbGnKlwNF9rvrbtyNcScwMfxCgWit4_1QF3n4}"
-DUCKY_PURCHASE_URL="${DUCKY_PURCHASE_URL:-https://ducksdev.gumroad.com/l/ducky-pool-pro}"
 APP_VERSION="${APP_VERSION:-1.0}"
 GITHUB_URL_DEFAULT="${GITHUB_URL:-https://github.com/ducksdev/ducky-installer}"
 
@@ -192,7 +179,10 @@ render_ckpool_config() {
         coinbase_suffix=$(python3 -c "
 import json,sys,re
 try:
-    s = json.load(open('$DATA_DIR/shared/settings.json')).get('pro', {}).get('coinbase_suffix', '')
+    data = json.load(open('$DATA_DIR/shared/settings.json'))
+    # Top-level field is the new home; old installs may still have
+    # 'pro.coinbase_suffix' until the web app migrates them on next save.
+    s = data.get('coinbase_suffix', '') or data.get('pro', {}).get('coinbase_suffix', '')
     s = re.sub(r'[^A-Za-z0-9 _\\-]', '', str(s))[:20].strip()
     print(s)
 except Exception:
@@ -206,10 +196,9 @@ except Exception:
     fi
 
     # Build the coinbase signature in the human-readable format
-    # "mined by NAME on Ducky Pool" (Pro) or "mined on Ducky Pool" (free).
-    # The contrast between the two strings IS the upgrade pitch — Pro
-    # users get their name permanently embedded in any block they find,
-    # free users get a generic pool credit.
+    # "mined by NAME on Ducky Pool" (with custom suffix) or "mined on Ducky
+    # Pool" (no suffix). All users can set a custom suffix — it's a
+    # per-install personalization, not a paid feature.
     #
     # Wrapped in slashes per Bitcoin convention (BIP-22 / "client-id"
     # style) so block explorers parse the signature cleanly. Total
@@ -362,14 +351,6 @@ services:
       HOST_PROC: /host-proc
       HOST_ROOT: /host-root
       BCHNODE_LOG: /bchnode-logs/debug.log
-      # License signing secret. When set, validates Pro license tokens
-      # signed with the SAME secret on the developer's side. When empty,
-      # the dashboard runs in free tier with no Pro features. On
-      # ducksdev's official builds this comes from a host-side env file
-      # written by the installer; users running their own forks should
-      # generate and bake in their own secret to issue tokens.
-      DUCKY_LICENSE_SECRET: "${DUCKY_LICENSE_SECRET:-}"
-      DUCKY_PURCHASE_URL: "${DUCKY_PURCHASE_URL:-https://ducksdev.gumroad.com/l/ducky-pool-pro}"
       APP_VERSION: "${APP_VERSION:-1.0}"
       GITHUB_URL: "${GITHUB_URL:-https://github.com/ducksdev/ducky-installer}"
     volumes:
@@ -549,7 +530,8 @@ render_ckpool_config() {
         coinbase_suffix=\$(python3 -c "
 import json,re
 try:
-    s = json.load(open('\$DATA_DIR_HOST/shared/settings.json')).get('pro', {}).get('coinbase_suffix', '')
+    data = json.load(open('\$DATA_DIR_HOST/shared/settings.json'))
+    s = data.get('coinbase_suffix', '') or data.get('pro', {}).get('coinbase_suffix', '')
     s = re.sub(r'[^A-Za-z0-9 _\\-]', '', str(s))[:20].strip()
     print(s)
 except Exception:
@@ -672,113 +654,11 @@ handle_wipe_marker() {
     fi
 }
 
-handle_drop_workers() {
-    # Free-tier worker cap enforcement. The web container writes
-    # \$MARKER_DIR/.drop_workers when there are workers above the free
-    # tier limit. We query ckpool for current stratum clients, match by
-    # worker name, and tell ckpool to drop them. The miner's firmware
-    # will reconnect automatically — we'll drop them again on the next
-    # tick. Effectively the worker is locked out of mining.
-    #
-    # Marker is ONLY removed by the web container (when user upgrades
-    # to Pro or stops connecting extra workers). We just enforce.
-    local marker="\$MARKER_DIR/.drop_workers"
-    [ -f "\$marker" ] || return 0
-
-    # Ignore stale markers (web container may have crashed). >5min old = stale.
-    local marker_age
-    marker_age=\$(( \$(date +%s) - \$(stat -c %Y "\$marker" 2>/dev/null || echo 0) ))
-    if [ "\$marker_age" -gt 300 ]; then
-        return 0
-    fi
-
-    # Query ckpool for current connected clients via its stratifier IPC.
-    # Output format may be a JSON array OR newline-delimited JSON objects;
-    # the parser handles both. Each client has 'id' and 'workername' fields.
-    local clients_json
-    clients_json=\$(/usr/bin/docker exec ducky-ckpool ckpmsg -s /tmp/ckpool/stratifier clients 2>/dev/null)
-    [ -z "\$clients_json" ] && return 0
-
-    # Match worker names from the marker against connected clients.
-    # Pass clients via stdin to avoid shell-quoting hazards in the JSON.
-    local ids_to_drop
-    ids_to_drop=\$(echo "\$clients_json" | MARKER_PATH="\$marker" python3 -c '
-import json, os, sys
-try:
-    with open(os.environ["MARKER_PATH"], "r", encoding="utf-8") as f:
-        marker = json.load(f)
-    targets = set(marker.get("workers") or [])
-    if not targets:
-        sys.exit(0)
-    raw = sys.stdin.read().strip()
-    clients = []
-    if raw.startswith("["):
-        try:
-            clients = json.loads(raw)
-        except Exception:
-            pass
-    else:
-        for line in raw.split("\n"):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-                if isinstance(obj, list):
-                    clients.extend(obj)
-                else:
-                    clients.append(obj)
-            except Exception:
-                continue
-    for c in clients:
-        if not isinstance(c, dict):
-            continue
-        wname = c.get("workername") or c.get("worker") or ""
-        cid = c.get("id")
-        if cid is None:
-            cid = c.get("client_id")
-        if wname in targets and cid is not None:
-            print(cid)
-except Exception:
-    pass
-' 2>/dev/null)
-
-    [ -z "\$ids_to_drop" ] && return 0
-
-    local dropped_count=0
-    while IFS= read -r cid; do
-        [ -z "\$cid" ] && continue
-        if /usr/bin/docker exec ducky-ckpool ckpmsg -s /tmp/ckpool/connector "dropclient=\$cid" >/dev/null 2>&1; then
-            dropped_count=\$((dropped_count + 1))
-        fi
-    done <<< "\$ids_to_drop"
-
-    if [ "\$dropped_count" -gt 0 ]; then
-        echo "[ducky-restart-watcher] free-tier cap: dropped \$dropped_count over-limit worker(s)"
-    fi
-}
-
-    [ -z "\$ids_to_drop" ] && return 0
-
-    local dropped_count=0
-    while IFS= read -r cid; do
-        [ -z "\$cid" ] && continue
-        if /usr/bin/docker exec ducky-ckpool ckpmsg -s /tmp/ckpool/connector "dropclient=\$cid" >/dev/null 2>&1; then
-            dropped_count=\$((dropped_count + 1))
-        fi
-    done <<< "\$ids_to_drop"
-
-    if [ "\$dropped_count" -gt 0 ]; then
-        echo "[ducky-restart-watcher] free-tier cap: dropped \$dropped_count over-limit worker(s)"
-    fi
-}
-
 while true; do
     handle_wipe_marker
     handle_marker "\$MARKER_DIR/.restart_ckpool"  "ckpool"
     handle_marker "\$MARKER_DIR/.restart_bchnode" "bchnode"
     handle_marker "\$MARKER_DIR/.restart_web"     "web"
-    handle_drop_workers
     sleep 2
 done
 WATCHER

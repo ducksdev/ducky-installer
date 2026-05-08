@@ -314,61 +314,6 @@
     .pill.error { background: rgba(255,107,107,0.12); color: #ffb1b1; border-color: rgba(255,107,107,0.3); }
     .pill.dim   { background: rgba(255,255,255,0.04); color: var(--muted); border-color: var(--border); }
 
-    /* ── tier badge (header — shows Free/Pro license tier) ──────── */
-    .tier-badge-wrap {
-      display: inline-flex; align-items: center; gap: 0.4rem;
-      margin-left: 0.5rem;
-    }
-    .tier-badge {
-      display: inline-flex; align-items: center; gap: 0.3rem;
-      padding: 0.22rem 0.65rem;
-      border-radius: 999px;
-      font-size: 0.7rem;
-      font-weight: 600;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      text-decoration: none;
-      transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
-      line-height: 1;
-      white-space: nowrap;
-    }
-    .tier-badge.pro {
-      background: linear-gradient(135deg, var(--accent) 0%, var(--accent-deep) 100%);
-      color: #1a1d24;
-      box-shadow: 0 1px 0 rgba(255,255,255,0.15) inset, 0 2px 6px rgba(249,168,37,0.25);
-      border: 1px solid var(--accent-deep);
-    }
-    .tier-badge.pro:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 1px 0 rgba(255,255,255,0.2) inset, 0 4px 12px rgba(249,168,37,0.4);
-    }
-    .tier-badge.free {
-      background: transparent;
-      color: var(--muted);
-      border: 1px solid var(--border);
-    }
-    .tier-badge .tier-icon { font-size: 0.85em; line-height: 1; }
-    .tier-badge-upgrade {
-      font-size: 0.7rem;
-      color: var(--accent);
-      text-decoration: none;
-      font-weight: 500;
-      padding: 0.18rem 0.55rem;
-      border-radius: 999px;
-      border: 1px solid transparent;
-      transition: border-color 0.15s, background 0.15s;
-      letter-spacing: 0.01em;
-      white-space: nowrap;
-    }
-    .tier-badge-upgrade:hover {
-      border-color: var(--accent);
-      background: rgba(249,168,37,0.1);
-    }
-    @media (max-width: 640px) {
-      .tier-badge { font-size: 0.62rem; padding: 0.18rem 0.5rem; }
-      .tier-badge-upgrade { display: none; }
-    }
-
     /* ── stats grid ──────────────────────────────────────────── */
     .stat-grid {
       display: grid;
@@ -527,18 +472,6 @@
           <span>Ducky <span class="accent">Pool</span></span>
         </a>
       </h1>
-      {% if license.is_pro %}
-        <span class="tier-badge-wrap">
-          <span class="tier-badge pro" title="Pro license active for {{ license.email }}">
-            <span class="tier-icon" aria-hidden="true">👑</span>Pro
-          </span>
-        </span>
-      {% else %}
-        <span class="tier-badge-wrap">
-          <a href="{{ url_for('settings_page') }}#license" class="tier-badge free" title="Free tier — view limits">Free</a>
-          <a href="{{ url_for('settings_page') }}#license" class="tier-badge-upgrade" title="Unlock all features">Upgrade ↗</a>
-        </span>
-      {% endif %}
       <span class="grow"></span>
       <a class="nav" href="{{ url_for('index') }}" title="Back to dashboard">← Dashboard</a>
       <a class="nav current" href="{{ url_for('health_page') }}" title="System health" aria-current="page">⚕ Health</a>
@@ -663,8 +596,12 @@
       <span class="footer-version">v{{ footer_version }}</span>
       <span class="footer-sep" aria-hidden="true">·</span>
       <a class="footer-link" href="{{ footer_github }}" target="_blank" rel="noopener">GitHub ↗</a>
+      <span class="footer-sep" aria-hidden="true">·</span>
+      <a class="footer-link footer-donate" href="#" onclick="event.preventDefault(); document.getElementById('donate-modal').showModal();" title="Support development">💚 Donate BCH</a>
     </div>
   </footer>
+
+  {% include "_donate_modal.html" ignore missing %}
 
   <script>
   // ── helpers ─────────────────────────────────────────────────────
