@@ -14,9 +14,7 @@ Endpoints:
 
 from __future__ import annotations
 
-import base64
 import hashlib
-import hmac
 import json
 import logging
 import logging.handlers
@@ -43,6 +41,7 @@ from flask import (
     jsonify,
     abort,
     session,
+    make_response,
 )
 
 app = Flask(__name__)
@@ -57,9 +56,7 @@ GITHUB_URL = os.environ.get("GITHUB_URL", "https://github.com/ducksdev/ducky-ins
 def _inject_footer_globals():
     """Make footer values available to every template without each
     route having to pass them. Uptime is computed per-request so the
-    footer ticks up live on each page load. License status is also
-    injected here so header pills + feature gates work uniformly across
-    all pages.
+    footer ticks up live on each page load.
     """
     uptime_s = max(0, int(time.time()) - APP_STARTED_AT)
     return {
@@ -67,9 +64,7 @@ def _inject_footer_globals():
         "footer_uptime_human": humanise_duration(uptime_s),
         "footer_version": APP_VERSION,
         "footer_github": GITHUB_URL,
-        "license": license_status(),
-        "purchase_url": PURCHASE_URL,
-        "free_tier_max_miners": FREE_TIER_MAX_MINERS,
+        "donation_address": DONATION_ADDRESS,
     }
 
 
@@ -130,29 +125,16 @@ BASELINE_FILE = os.path.join(STATE_DIR, "best_baselines.json")
 SEEN_BLOCKS_FILE = os.path.join(STATE_DIR, "seen_blocks.json")
 HISTORY_DB = os.path.join(STATE_DIR, "history.db")
 
-# License system
-# Tokens are signed by the developer (you) using DUCKY_LICENSE_SECRET as the
-# HMAC key. Each token contains an email + tier + issue timestamp. Tokens
-# are portable text — users paste them into Settings → License. Verification
-# is purely local (no network, no phone-home, no tracking).
-#
-# To issue a new token, run the standalone scripts/issue_license.py with the
-# secret set in env. To revoke all existing tokens (e.g. if a leak happens),
-# rotate the secret in a future release; old tokens stop verifying.
-#
-# If DUCKY_LICENSE_SECRET is unset, the system fails CLOSED (free tier) but
-# the dashboard still works — we never block the user from running their
-# pool, just from accessing Pro features.
-LICENSE_SECRET = os.environ.get("DUCKY_LICENSE_SECRET", "").encode("utf-8")
-LICENSE_TIER_FREE = "free"
-LICENSE_TIER_PRO = "pro"
-# Free tier hard limits. Tweak these once and they propagate everywhere via
-# the helpers below — don't sprinkle magic numbers across the code base.
-FREE_TIER_MAX_MINERS = 3
-PURCHASE_URL = os.environ.get(
-    "DUCKY_PURCHASE_URL",
-    "https://ducksdev.gumroad.com/l/ducky-pool-pro",  # placeholder — update when live
+# Donation address surfaced in the footer + dashboard card. Free, FOSS,
+# donation-driven — no license tokens, no tiers, no enforcement. Users
+# who find Ducky Pool useful can throw a few sats this way; users who
+# don't, don't have to. Address is configurable via env var so forks
+# can substitute their own.
+DONATION_ADDRESS = os.environ.get(
+    "DUCKY_DONATION_ADDRESS",
+    "bitcoincash:qq3557shr2wwpy2ryyswhmpwaaxnw9m7aqjhv6hgjf",
 )
+
 # When this file appears, ckpool's entrypoint stops ckpool, removes the
 # marker, and starts ckpool fresh on the next loop iteration. We use this
 # to clear ckpool's in-memory bestshare cache on "Wipe all stats".
@@ -217,24 +199,14 @@ DEFAULT_SETTINGS = {
         "enabled": False,
         "password_hash": "",
     },
-    # License token for Pro features. Empty = free tier with hard limits
-    # (3 miners visible, no Discord webhook, etc). Token is opaque to the
-    # server; verification is done in license_status().
-    "license": {
-        "token": "",
-    },
-    # Pro-only customizations. Saving these requires an active Pro license;
-    # the settings save handler refuses to update them on free tier.
-    # Stored regardless of current tier so the user can buy/cancel/rebuy
-    # without losing their config.
-    "pro": {
-        # Personal suffix appended to the coinbase signature (the human-
-        # readable string baked into blocks your pool finds). Becomes
-        # /ducky-pool/<suffix>/. Hard ceiling 20 chars so the combined
-        # signature fits in ckpool's 96-byte coinbase limit with room
-        # for the base prefix. Stripped to printable ASCII on save.
-        "coinbase_suffix": "",
-    },
+    # Personal suffix used in the block coinbase signature. Becomes
+    # "/mined by <suffix> on Ducky Pool/" or "/mined on Ducky Pool/" if
+    # blank. Hard ceiling 20 chars so the combined signature fits in
+    # ckpool's 96-byte coinbase limit. Stripped to printable ASCII on
+    # save. Free for everyone (was Pro-only in earlier versions; the
+    # legacy "pro.coinbase_suffix" path is migrated automatically on
+    # first load — see _merge_defaults below).
+    "coinbase_suffix": "",
 }
 
 ONLINE_SECONDS = 10 * 60
@@ -540,7 +512,14 @@ def _normalise_tiers(raw) -> list:
 
 def _merge_defaults(loaded: dict) -> dict:
     out = dict(DEFAULT_SETTINGS)
-    out.update({k: v for k, v in loaded.items() if k not in ("discord", "auth", "tiers", "license", "pro")})
+    # Strip legacy keys from passthrough: "pro" sub-dict is replaced by
+    # top-level coinbase_suffix; "license" is gone entirely. Any other
+    # top-level key in loaded that's not a structured sub-dict gets
+    # carried through (mindiff, maxdiff, startdiff, auto_hide, etc).
+    out.update({
+        k: v for k, v in loaded.items()
+        if k not in ("discord", "auth", "tiers", "pro", "license")
+    })
     discord = dict(DEFAULT_SETTINGS["discord"])
     discord.update(loaded.get("discord") or {})
     out["discord"] = discord
@@ -552,13 +531,18 @@ def _merge_defaults(loaded: dict) -> dict:
     if not auth.get("password_hash"):
         auth["enabled"] = False
     out["auth"] = auth
-    license_dict = dict(DEFAULT_SETTINGS["license"])
-    license_dict.update(loaded.get("license") or {})
-    out["license"] = license_dict
-    pro = dict(DEFAULT_SETTINGS["pro"])
-    pro.update(loaded.get("pro") or {})
-    out["pro"] = pro
     out["tiers"] = _normalise_tiers(loaded.get("tiers"))
+
+    # Migration: existing installs may have coinbase_suffix tucked under
+    # "pro" sub-dict (Pro-tier era). Promote it to top-level if no new
+    # top-level value is set. Next save() drops the legacy "pro" key
+    # entirely. Same logic for "license" — silently dropped.
+    if not out.get("coinbase_suffix"):
+        legacy_pro = loaded.get("pro") or {}
+        legacy_suffix = legacy_pro.get("coinbase_suffix")
+        if legacy_suffix:
+            out["coinbase_suffix"] = legacy_suffix
+
     return out
 
 
@@ -634,98 +618,6 @@ def check_password(plaintext: str) -> bool:
         return bcrypt.checkpw(plaintext.encode("utf-8"), stored.encode("utf-8"))
     except (ValueError, TypeError):
         return False
-
-
-def issue_license_token(email: str, tier: str = LICENSE_TIER_PRO) -> str:
-    """Issue a signed license token. Used by the standalone issue_license
-    script. Format: base64(email|tier|issued_ts)|hex(hmac). Anyone with
-    the secret can issue; only the secret holder can verify. Email is
-    visible to anyone with the token — that's fine, it's their email.
-    """
-    if not LICENSE_SECRET:
-        raise RuntimeError("DUCKY_LICENSE_SECRET not set — cannot issue license tokens")
-    if not email or "@" not in email:
-        raise ValueError("Email required")
-    if tier not in (LICENSE_TIER_PRO,):
-        raise ValueError(f"Unsupported tier: {tier}")
-    payload = f"{email.strip().lower()}|{tier}|{int(time.time())}"
-    payload_b64 = base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii").rstrip("=")
-    sig = hmac.new(LICENSE_SECRET, payload.encode("utf-8"), hashlib.sha256).hexdigest()
-    return f"{payload_b64}.{sig}"
-
-
-def parse_license_token(token: str) -> dict | None:
-    """Verify and decode a license token. Returns dict with email, tier,
-    issued_at on success; None on any failure. Pure local operation — no
-    network calls, no logging of the token itself.
-
-    Failure modes:
-      - Empty/malformed token -> None
-      - HMAC mismatch (forged or wrong secret) -> None
-      - DUCKY_LICENSE_SECRET not configured -> None (free tier)
-    """
-    if not LICENSE_SECRET or not token:
-        return None
-    token = token.strip()
-    if "." not in token:
-        return None
-    payload_b64, sig = token.rsplit(".", 1)
-    try:
-        # Add padding back for base64 decode
-        padded = payload_b64 + "=" * (-len(payload_b64) % 4)
-        payload = base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
-    except (ValueError, UnicodeDecodeError):
-        return None
-    expected_sig = hmac.new(LICENSE_SECRET, payload.encode("utf-8"), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(expected_sig, sig.lower()):
-        return None
-    parts = payload.split("|")
-    if len(parts) != 3:
-        return None
-    email, tier, issued_at_str = parts
-    try:
-        issued_at = int(issued_at_str)
-    except ValueError:
-        return None
-    if tier not in (LICENSE_TIER_PRO,):
-        return None
-    return {"email": email, "tier": tier, "issued_at": issued_at}
-
-
-def license_status() -> dict:
-    """Inspect the currently-stored license token from settings and
-    return a structured status used by templates and feature gates.
-
-    Always returns a dict — never None — so callers can use it without
-    null checks. The 'is_pro' boolean is the canonical feature gate.
-    """
-    s = load_settings()
-    raw = (s.get("license") or {}).get("token", "").strip()
-    parsed = parse_license_token(raw) if raw else None
-    if parsed:
-        return {
-            "is_pro": True,
-            "tier": parsed["tier"],
-            "email": parsed["email"],
-            "issued_at": parsed["issued_at"],
-            "valid": True,
-            "has_token": True,
-        }
-    return {
-        "is_pro": False,
-        "tier": LICENSE_TIER_FREE,
-        "email": "",
-        "issued_at": 0,
-        "valid": False,
-        # has_token=True means user pasted SOMETHING but it didn't verify
-        # — useful to render "Invalid license key" instead of "no key".
-        "has_token": bool(raw),
-    }
-
-
-def is_pro() -> bool:
-    """Shorthand for feature gates."""
-    return license_status()["is_pro"]
 
 
 def auth_enabled() -> bool:
@@ -1110,6 +1002,144 @@ def get_service_health() -> list[dict]:
     })
 
     return services
+
+
+def block_readiness_check() -> dict:
+    """Diagnostic sweep that proves the block-finding pipeline is wired
+    correctly. Each check has a deterministic answer that doesn't
+    require waiting for a real block.
+
+    Returns dict with overall status + per-check details. The Health
+    page renders this; the same data also lands in the Discord webhook
+    if/when the user runs the test.
+    """
+    checks: list[dict] = []
+
+    def add(key: str, label: str, status: str, detail: str) -> None:
+        checks.append({
+            "key": key, "label": label, "status": status, "detail": detail,
+        })
+
+    # 1. bchnode reachable + fully synced
+    chain_info = None
+    try:
+        chain_info = rpc("getblockchaininfo")
+        progress = float(chain_info.get("verificationprogress") or 0)
+        height = int(chain_info.get("blocks") or 0)
+        if progress >= 0.9999:
+            add("node_synced", "BCH node fully synced", "ok",
+                f"Block height {height:,} · {progress * 100:.4f}% verified")
+        elif progress >= 0.95:
+            add("node_synced", "BCH node nearly synced", "warn",
+                f"At {progress * 100:.2f}% — wait for full sync before counting on blocks")
+        else:
+            add("node_synced", "BCH node still syncing", "err",
+                f"At {progress * 100:.2f}% — node won't deliver work until synced")
+    except Exception as exc:  # noqa: BLE001
+        add("node_synced", "BCH node unreachable", "err",
+            f"RPC call failed: {exc}")
+
+    # 2. getblocktemplate works (ckpool uses this every share)
+    try:
+        # BCH wants {"rules": ["csv"]} or empty object; empty is fine for read-only.
+        tmpl = rpc("getblocktemplate", [{"rules": []}])
+        if tmpl and "previousblockhash" in tmpl and "target" in tmpl:
+            target = tmpl.get("target", "")
+            bits = tmpl.get("bits", "")
+            add("block_template", "Mining work available from node", "ok",
+                f"target prefix {target[:16]}… · bits {bits} · ckpool can fetch templates")
+        else:
+            add("block_template", "Block template malformed", "warn",
+                "getblocktemplate returned unexpected fields — check bchnode version")
+    except Exception as exc:  # noqa: BLE001
+        add("block_template", "Block template unavailable", "err",
+            f"getblocktemplate failed: {exc} — ckpool can't get mining work")
+
+    # 3. Payout address validates against BCH
+    payout = read_payout()
+    if not payout:
+        add("payout", "Payout address not set", "err",
+            "Set a payout address before mining — blocks can't be assigned without it")
+    else:
+        try:
+            valid = rpc("validateaddress", [payout])
+            if valid.get("isvalid"):
+                add("payout", "Payout address valid", "ok",
+                    f"{payout[:24]}… is a valid BCH address")
+            else:
+                add("payout", "Payout address invalid", "err",
+                    f"{payout[:24]}… isn't accepted by BCH — block rewards would be lost")
+        except Exception as exc:  # noqa: BLE001
+            add("payout", "Could not validate address", "warn",
+                f"RPC call failed: {exc}")
+
+    # 4. Stratum port accepts TCP connections from inside the container
+    try:
+        with socket.create_connection(("ckpool", STRATUM_PORT), timeout=3):
+            add("stratum_port", "Stratum port open", "ok",
+                f"ckpool is accepting connections on port {STRATUM_PORT}")
+    except (socket.error, socket.timeout) as exc:
+        add("stratum_port", "Stratum port not reachable", "err",
+            f"Can't connect to ckpool:{STRATUM_PORT} — ckpool may be down ({exc})")
+
+    # 5. ckpool.conf reflects current settings (the actual config running)
+    conf_path = "/shared/../ckpool-config/ckpool.conf"
+    # The web container doesn't normally have ckpool-config mounted, so
+    # try a few likely locations. If not found, skip with info status.
+    conf_text = None
+    for p in ("/ckpool-config/ckpool.conf", "/var/lib/ducky-pool/ckpool-config/ckpool.conf"):
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                conf_text = f.read()
+            break
+        except OSError:
+            continue
+    if conf_text:
+        sig_match = re.search(r'"btcsig"\s*:\s*"([^"]*)"', conf_text)
+        addr_match = re.search(r'"btcaddress"\s*:\s*"([^"]*)"', conf_text)
+        sig = sig_match.group(1) if sig_match else "(missing)"
+        addr_in_conf = addr_match.group(1) if addr_match else ""
+        if addr_in_conf == payout:
+            add("config_match", "ckpool.conf matches dashboard", "ok",
+                f"Signature: {sig} · address matches payout setting")
+        else:
+            add("config_match", "ckpool.conf address mismatch", "warn",
+                f"Conf has {addr_in_conf[:24]}… but dashboard payout is {payout[:24]}… — restart ckpool")
+    else:
+        # Not having access from the web container isn't a real failure;
+        # the host-side rendering is what matters.
+        add("config_match", "ckpool.conf not visible from web container", "warn",
+            "Can't introspect (container isolation) — verify by running: sudo cat /var/lib/ducky-pool/ckpool-config/ckpool.conf | grep btcsig")
+
+    # 6. Has any block ever been found
+    blocks_count = 0
+    try:
+        if os.path.exists(BLOCKS_LOG):
+            with open(BLOCKS_LOG, "r", encoding="utf-8") as f:
+                blocks_count = sum(1 for line in f if line.strip())
+    except OSError:
+        pass
+    if blocks_count > 0:
+        add("submission_proven", "Block submission proven", "ok",
+            f"{blocks_count} block{'s' if blocks_count != 1 else ''} found by this install — submission path is verified working")
+    else:
+        add("submission_proven", "No blocks found yet", "warn",
+            "Pipeline looks correct but no real block has tested it. ckpool's submission code is battle-tested — you're not the first to run this stack.")
+
+    # Overall status: err if any err, warn if any warn, otherwise ok
+    statuses = [c["status"] for c in checks]
+    if "err" in statuses:
+        overall = "err"
+    elif "warn" in statuses:
+        overall = "warn"
+    else:
+        overall = "ok"
+
+    return {
+        "overall": overall,
+        "checks": checks,
+        "checked_at": int(time.time()),
+    }
 
 
 def health_payload() -> dict:
@@ -1829,12 +1859,6 @@ def duck_stage(sdiff: float, net_diff: float | None = None) -> dict:
 
 
 def _post_discord(content: str | None, embeds: list[dict] | None = None) -> tuple[bool, str]:
-    # Pro-tier gate. Free installs may have a webhook URL configured (we
-    # don't wipe it on tier change), but webhooks won't fire until they
-    # upgrade. Check tier BEFORE loading settings/url so the early-return
-    # is cheap on the hot path (best-share watcher hits this every minute).
-    if not is_pro():
-        return False, "Pro required for Discord webhooks."
     s = load_settings()
     url = s["discord"]["webhook_url"]
     if not url:
@@ -2468,65 +2492,6 @@ def _start_share_tailer() -> None:
 # ──────────────────────────── main watcher loop ────────────────────────────
 
 
-# Marker file the host-side restart watcher reads to enforce the free-tier
-# worker cap. Format: JSON {"workers": ["addr.name1", "addr.name2"], "ts": ...}
-# These workers will be repeatedly dropped from ckpool until either:
-#   (a) the user upgrades to Pro, or
-#   (b) the workers stop attempting to connect.
-DROP_WORKERS_MARKER = os.path.join(STATE_DIR, ".drop_workers")
-
-
-def _update_worker_cap_enforcement() -> None:
-    """Pick which workers to drop (if any) and write the marker for the
-    host-side watcher. Called on every watcher tick.
-
-    Free tier with >3 workers: bottom (N - 3) by hashrate get marked for
-    drop. Same sort logic as the dashboard's truncation — the workers the
-    user CAN see in the dashboard are the same ones we let mine.
-
-    Pro tier OR free with <=3 workers: marker is cleared so the host
-    watcher knows there's nothing to enforce."""
-    try:
-        if is_pro():
-            _clear_drop_marker()
-            return
-        workers = get_workers()
-        if len(workers) <= FREE_TIER_MAX_MINERS:
-            _clear_drop_marker()
-            return
-        # Sort by hashrate descending; the BOTTOM ones are the ones to drop.
-        sorted_w = sorted(
-            workers,
-            key=lambda w: _hashrate_str_to_float(w.get("hashrate_1m") or "0H/s") or 0,
-            reverse=True,
-        )
-        to_drop = sorted_w[FREE_TIER_MAX_MINERS:]
-        # Use the full id (e.g. "address.workername") so the watcher can
-        # match against ckpool's stratifier output exactly.
-        worker_ids = [w.get("id") or w.get("name") for w in to_drop if w.get("id") or w.get("name")]
-        payload = {
-            "workers": worker_ids,
-            "ts": int(time.time()),
-        }
-        # Atomic write so the watcher never reads a half-written file.
-        tmp = DROP_WORKERS_MARKER + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(payload, f)
-        os.replace(tmp, DROP_WORKERS_MARKER)
-    except Exception as exc:  # noqa: BLE001
-        app.logger.exception("worker cap enforcement failed: %s", exc)
-
-
-def _clear_drop_marker() -> None:
-    """Remove the drop marker if it exists. Idempotent."""
-    try:
-        os.remove(DROP_WORKERS_MARKER)
-    except FileNotFoundError:
-        pass
-    except OSError as exc:
-        app.logger.warning("could not remove drop marker: %s", exc)
-
-
 def _auto_hide_offline_workers() -> None:
     """Auto-hide miners that have been offline longer than the configured
     threshold. Threshold 0 = disabled. Same mechanism as manual Hide:
@@ -2598,10 +2563,6 @@ def _watcher_loop() -> None:
             _check_blocks_and_fire(now)
         except Exception as exc:  # noqa: BLE001
             app.logger.exception("blocks watcher tick failed: %s", exc)
-        try:
-            _update_worker_cap_enforcement()
-        except Exception as exc:  # noqa: BLE001
-            app.logger.exception("worker cap watcher tick failed: %s", exc)
         try:
             _auto_hide_offline_workers()
         except Exception as exc:  # noqa: BLE001
@@ -2747,35 +2708,10 @@ def _build_stats_payload(public: bool = False) -> dict:
         "net_diff_human": humanise_diff(net_diff) if net_diff else "—",
     }
 
-    # Free-tier worker cap. Apply LAST so all internal calculations
-    # (best share, webhook firing, block detection) see the full list.
-    # Only the dashboard UI gets the truncated list. Sort by hashrate
-    # so the user sees their biggest miners at the cap.
     full_count = len(workers)
-    pro = is_pro()
-    payload["is_pro_tier"] = pro
-    payload["worker_cap"] = None if pro else FREE_TIER_MAX_MINERS
-    payload["rejected_workers"] = []
-
-    if not pro and full_count > FREE_TIER_MAX_MINERS:
-        sorted_workers = sorted(
-            workers,
-            key=lambda w: _hashrate_str_to_float(w.get("hashrate_1m") or "0H/s") or 0,
-            reverse=True,
-        )
-        payload["workers"] = sorted_workers[:FREE_TIER_MAX_MINERS]
-        # The "rejected" workers carry their real name + last-known stats
-        # so the dashboard can show "you have a worker called X being
-        # rejected" rather than fake placeholder rows. These match
-        # exactly what the host-side enforcement is dropping.
-        payload["rejected_workers"] = sorted_workers[FREE_TIER_MAX_MINERS:]
-        payload["workers_truncated"] = True
-        payload["workers_total"] = full_count
-        payload["workers_visible"] = FREE_TIER_MAX_MINERS
-    else:
-        payload["workers_truncated"] = False
-        payload["workers_total"] = full_count
-        payload["workers_visible"] = full_count
+    payload["workers_truncated"] = False
+    payload["workers_total"] = full_count
+    payload["workers_visible"] = full_count
 
     if not public:
         s = load_settings()
@@ -2839,12 +2775,8 @@ def index():
         status=payload["node"],
         pool=payload["pool"],
         workers=payload["workers"],
-        rejected_workers=payload.get("rejected_workers", []),
-        workers_truncated=payload.get("workers_truncated", False),
         workers_total=payload.get("workers_total", 0),
         workers_visible=payload.get("workers_visible", 0),
-        worker_cap=payload.get("worker_cap"),
-        is_pro_tier=payload.get("is_pro_tier", False),
         blocks=payload["blocks"],
         eta=payload["eta"],
         net_diff_human=payload["net_diff_human"],
@@ -2869,12 +2801,8 @@ def public_view():
         status=payload["node"],
         pool=payload["pool"],
         workers=payload["workers"],
-        rejected_workers=payload.get("rejected_workers", []),
-        workers_truncated=payload.get("workers_truncated", False),
         workers_total=payload.get("workers_total", 0),
         workers_visible=payload.get("workers_visible", 0),
-        worker_cap=payload.get("worker_cap"),
-        is_pro_tier=payload.get("is_pro_tier", False),
         blocks=payload["blocks"],
         eta=payload["eta"],
         net_diff_human=payload["net_diff_human"],
@@ -3146,22 +3074,7 @@ def settings_page():
             "color":  t["color"],
         })
     # Live worker stats for the License card — show users their actual
-    # tier usage right where they decide whether to upgrade. Computed
-    # once per page-render; settings isn't a hot path.
-    all_workers = get_workers()
-    pro = is_pro()
-    rejected_names = []
-    if not pro and len(all_workers) > FREE_TIER_MAX_MINERS:
-        sorted_w = sorted(
-            all_workers,
-            key=lambda w: _hashrate_str_to_float(w.get("hashrate_1m") or "0H/s") or 0,
-            reverse=True,
-        )
-        rejected_names = [w.get("name", "") for w in sorted_w[FREE_TIER_MAX_MINERS:]]
-    license_workers_total = len(all_workers)
-    license_workers_active = min(license_workers_total, FREE_TIER_MAX_MINERS) if not pro else license_workers_total
-
-    return render_template(
+    response = make_response(render_template(
         "settings.html",
         settings=s,
         mindiff_h=humanise_diff(s["mindiff"]) if s["mindiff"] else "1",
@@ -3170,10 +3083,10 @@ def settings_page():
         min_share_h=humanise_diff(min_share_raw) if min_share_raw > 0 else "",
         tier_min_h=tier_min_h,
         default_tiers_json=json.dumps(default_tiers),
-        license_workers_total=license_workers_total,
-        license_workers_active=license_workers_active,
-        license_rejected_names=rejected_names,
-    )
+    ))
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    return response
 
 
 @app.route("/settings/save", methods=["POST"])
@@ -3251,6 +3164,35 @@ def settings_save():
     raw_labels  = request.form.getlist("tier_label")
     raw_flavors = request.form.getlist("tier_flavor")
     raw_colors  = request.form.getlist("tier_color")
+
+    # Server-side diagnostic so we can debug "tier disappeared" reports.
+    # These get logged regardless of outcome so we can correlate "user
+    # added X but only saw Y saved" against the actual form payload.
+    app.logger.info(
+        "settings_save: received tier arrays — mins=%d emojis=%d labels=%d flavors=%d colors=%d. "
+        "labels=%r mins=%r",
+        len(raw_mins), len(raw_emojis), len(raw_labels),
+        len(raw_flavors), len(raw_colors),
+        raw_labels, raw_mins,
+    )
+    # Also log all form keys we received so we can spot if our names got
+    # mangled by some middleware (e.g. tier_label vs tier-label).
+    app.logger.info(
+        "settings_save: all form keys: %r",
+        sorted(set(request.form.keys())),
+    )
+    # If the parallel arrays don't all have the same length, the JS clone
+    # produced a malformed row (some input lost its `name=`). Warn the
+    # user clearly instead of silently shifting the per-row data.
+    expected_len = len(raw_mins)
+    if not all(len(arr) == expected_len for arr in
+               (raw_emojis, raw_labels, raw_flavors, raw_colors)):
+        errors.append(
+            "Tier rows look malformed (mismatched field counts). "
+            "Try refreshing the page and re-adding any new tiers, "
+            "or check the browser console for JS errors."
+        )
+
     tier_rows = []
     for i, raw_min in enumerate(raw_mins):
         raw_min = (raw_min or "").strip()
@@ -3334,21 +3276,28 @@ def settings_save():
             else:
                 new_auth["enabled"] = True
 
-    # Pro coinbase suffix. Pro-tier-only: free users can submit this
-    # via curl but it'll be silently dropped. Existing value is preserved
-    # across free-tier saves so a license lapse doesn't wipe customization.
+    # Coinbase suffix — free for everyone. The same regex as install.sh's
+    # sanitizer, kept in sync. Result becomes "/mined by <suffix> on Ducky
+    # Pool/" in the block coinbase scriptSig.
     raw_suffix = (request.form.get("coinbase_suffix") or "").strip()
-    if is_pro():
-        # Same regex as the install.sh sanitizer — kept in sync.
-        clean_suffix = re.sub(r"[^A-Za-z0-9 _\-]", "", raw_suffix)[:20].strip()
-        new_pro = {"coinbase_suffix": clean_suffix}
-    else:
-        # Free tier — keep whatever was there before.
-        new_pro = dict(s.get("pro", {}))
+    clean_suffix = re.sub(r"[^A-Za-z0-9 _\-]", "", raw_suffix)[:20].strip()
 
     if errors:
+        # Make it explicit nothing was saved when validation fails.
+        # Without this the user sees errors but the page also reverts
+        # to the old saved values silently.
         for e in errors:
             flash(e, "error")
+        flash(
+            f"Settings NOT saved — please fix the errors above. "
+            f"({len(errors)} error{'s' if len(errors) != 1 else ''})",
+            "error",
+        )
+        # Log to server too so we can see what's happening
+        app.logger.warning(
+            "settings_save: refused with %d errors. tier_rows received: %d, errors: %s",
+            len(errors), len(tier_rows), errors,
+        )
         return redirect(url_for("settings_page"))
 
     new = {
@@ -3364,11 +3313,7 @@ def settings_save():
         },
         "tiers": _normalise_tiers(tier_rows),
         "auth": new_auth,
-        "pro": new_pro,
-        # The main settings form doesn't include the license token field
-        # (license has its own /license/save endpoint). Carry the existing
-        # value through so saving other settings doesn't reset to free tier.
-        "license": dict(s.get("license", {})),
+        "coinbase_suffix": clean_suffix,
     }
     save_settings(new)
 
@@ -3384,8 +3329,11 @@ def settings_save():
         new["maxdiff"]   != s["maxdiff"] or
         new["startdiff"] != s["startdiff"]
     )
+    # Read suffix from top-level (current) on both sides. _merge_defaults
+    # has already migrated any legacy pro.coinbase_suffix into top-level
+    # coinbase_suffix on `s`, so this comparison is symmetrical.
     suffix_changed = (
-        new["pro"].get("coinbase_suffix", "") != s.get("pro", {}).get("coinbase_suffix", "")
+        new.get("coinbase_suffix", "") != s.get("coinbase_suffix", "")
     )
     ckpool_config_changed = diff_changed or suffix_changed
     auth_changed = (
@@ -3410,55 +3358,11 @@ def settings_save():
             msgs.append("Dashboard auth is now ON.")
         else:
             msgs.append("Dashboard auth is now OFF.")
-    if msgs:
-        flash("Settings saved. " + " ".join(msgs), "ok")
-    else:
-        flash("Settings saved.", "ok")
+    saved_tier_count = len(new["tiers"])
+    msgs.append(f"{saved_tier_count} duck tier{'s' if saved_tier_count != 1 else ''} saved.")
+    flash("Settings saved. " + " ".join(msgs), "ok")
+    app.logger.info("settings_save: %d tiers saved", saved_tier_count)
     return redirect(url_for("settings_page"))
-
-
-@app.route("/license/save", methods=["POST"])
-@login_required
-def license_save():
-    """Validate and store a license token. Refuses to save invalid
-    tokens — that way the user sees the error immediately rather than
-    discovering it via "Pro features still locked"."""
-    token = (request.form.get("token") or "").strip()
-    if not token:
-        flash("Paste a license key into the field first.", "error")
-        return redirect(url_for("settings_page") + "#license")
-
-    parsed = parse_license_token(token)
-    if not parsed:
-        flash(
-            "Invalid license key. Check you copied the full key including "
-            "the dot in the middle. If the key was issued before a recent "
-            "update, you may need a refreshed key — email support.",
-            "error",
-        )
-        return redirect(url_for("settings_page") + "#license")
-
-    s = load_settings()
-    s["license"] = {"token": token}
-    save_settings(s)
-    flash(
-        f"Pro license activated for {parsed['email']}. Thanks for supporting Ducky Pool 🦆",
-        "ok",
-    )
-    return redirect(url_for("settings_page") + "#license")
-
-
-@app.route("/license/clear", methods=["POST"])
-@login_required
-def license_clear():
-    """Remove the stored license token. Reverts the install to the free
-    tier — useful for moving a license to another machine, or for testing.
-    """
-    s = load_settings()
-    s["license"] = {"token": ""}
-    save_settings(s)
-    flash("License removed. Free tier active.", "ok")
-    return redirect(url_for("settings_page") + "#license")
 
 
 @app.route("/webhook/test", methods=["POST"])
@@ -3497,6 +3401,17 @@ def health_page():
 @login_required_json
 def api_health():
     return jsonify(health_payload())
+
+
+@app.route("/api/readiness-check", methods=["GET"])
+@login_required_json
+def api_readiness_check():
+    """Diagnostic sweep that proves the block-finding pipeline is wired
+    correctly. Run from the Health page when the user wants to know
+    "would my pool actually win a block if a high-difficulty share
+    came through?"
+    """
+    return jsonify(block_readiness_check())
 
 
 @app.route("/api/check-updates", methods=["POST"])

@@ -10,5 +10,6 @@ services/web/templates/index.html
 services/web/templates/settings.html
 services/web/templates/login.html
 services/web/templates/health.html
+services/web/templates/_donate_modal.html
 
 services/ckpool/ckpool.conf.template

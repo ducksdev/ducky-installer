@@ -397,60 +397,6 @@
     .pill.ok    { background: rgba(76,217,100,0.15);  color: var(--success); }
     .pill.dim   { background: rgba(138,146,166,0.15); color: var(--muted); }
 
-    /* ── tier badge (header — shows Free/Pro license tier) ──────── */
-    .tier-badge-wrap {
-      display: inline-flex; align-items: center; gap: 0.4rem;
-      margin-left: 0.5rem;
-    }
-    .tier-badge {
-      display: inline-flex; align-items: center; gap: 0.3rem;
-      padding: 0.22rem 0.65rem;
-      border-radius: 999px;
-      font-size: 0.7rem;
-      font-weight: 600;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      text-decoration: none;
-      transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
-      line-height: 1;
-      white-space: nowrap;
-    }
-    .tier-badge.pro {
-      background: linear-gradient(135deg, var(--accent) 0%, var(--accent-deep) 100%);
-      color: #1a1d24;
-      box-shadow: 0 1px 0 rgba(255,255,255,0.15) inset, 0 2px 6px rgba(249,168,37,0.25);
-      border: 1px solid var(--accent-deep);
-    }
-    .tier-badge.pro:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 1px 0 rgba(255,255,255,0.2) inset, 0 4px 12px rgba(249,168,37,0.4);
-    }
-    .tier-badge.free {
-      background: transparent;
-      color: var(--muted);
-      border: 1px solid var(--border);
-    }
-    .tier-badge .tier-icon { font-size: 0.85em; line-height: 1; }
-    .tier-badge-upgrade {
-      font-size: 0.7rem;
-      color: var(--accent);
-      text-decoration: none;
-      font-weight: 500;
-      padding: 0.18rem 0.55rem;
-      border-radius: 999px;
-      border: 1px solid transparent;
-      transition: border-color 0.15s, background 0.15s;
-      letter-spacing: 0.01em;
-      white-space: nowrap;
-    }
-    .tier-badge-upgrade:hover {
-      border-color: var(--accent);
-      background: rgba(249,168,37,0.1);
-    }
-    @media (max-width: 640px) {
-      .tier-badge { font-size: 0.62rem; padding: 0.18rem 0.5rem; }
-      .tier-badge-upgrade { display: none; }
-    }
     .note {
       background: var(--panel-soft);
       border-left: 3px solid var(--accent);
@@ -631,18 +577,6 @@
           <span>Ducky <span class="accent">Pool</span></span>
         </a>
       </h1>
-      {% if license.is_pro %}
-        <span class="tier-badge-wrap">
-          <span class="tier-badge pro" title="Pro license active for {{ license.email }}">
-            <span class="tier-icon" aria-hidden="true">👑</span>Pro
-          </span>
-        </span>
-      {% else %}
-        <span class="tier-badge-wrap">
-          <a href="#license" class="tier-badge free" title="Free tier — view limits">Free</a>
-          <a href="#license" class="tier-badge-upgrade" title="Unlock all features">Upgrade ↗</a>
-        </span>
-      {% endif %}
       <span class="grow"></span>
       <a class="nav" href="{{ url_for('index') }}" title="Back to dashboard">← Dashboard</a>
       <a class="nav" href="{{ url_for('health_page') }}" title="System health">⚕ Health</a>
@@ -668,126 +602,50 @@
     <div class="settings-section">
       <h3 class="settings-section-label">Account</h3>
 
-    <!-- ── License card (own form — not part of main settings) ── -->
-    <div class="card" data-card="license" id="license"
-         data-default-collapsed="{{ 'true' if license.is_pro else 'false' }}">
+    <!-- ── Support development card ─────────────────────────────── -->
+    <div class="card" data-card="support" id="support" data-default-collapsed="true">
       <header class="collapsible">
-        <span class="row-icon {{ 'accent' if license.is_pro else '' }}" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 21h-9a3 3 0 0 1 -3 -3v-1h10v2a2 2 0 0 0 4 0v-14a2 2 0 1 1 2 2h-2"/><path d="M19 17v-13a2 2 0 0 0 -2 -2h-11a2 2 0 0 0 -2 2v12"/><line x1="9" y1="7" x2="13" y2="7"/><line x1="9" y1="11" x2="13" y2="11"/></svg>
+        <span class="row-icon accent" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19.5 12.572l-7.5 7.428l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572"/></svg>
         </span>
         <span class="row-main">
-          <span class="row-title">
-            License
-            {% if license.is_pro %}
-              <span class="row-pill pro">Pro</span>
-            {% elif license.has_token %}
-              <span class="row-pill warn">Invalid</span>
-            {% else %}
-              <span class="row-pill dim">Free</span>
-            {% endif %}
-          </span>
+          <span class="row-title">Support development</span>
           <span class="row-summary prose">
-            {% if license.is_pro %}
-              {{ license.email }} · activated
-            {% elif license_rejected_names %}
-              <span style="color: var(--error, #ff6b6b);">{{ license_rejected_names|length }} miner{{ 's' if license_rejected_names|length != 1 else '' }} rejected</span> · upgrade for unlimited
-            {% else %}
-              {{ license_workers_total }} of {{ free_tier_max_miners }} miner slots in use · £35 to unlock Pro
-            {% endif %}
+            Ducky Pool is free + open source. Donations are appreciated, never required.
           </span>
         </span>
         <span class="chevron" aria-hidden="true">▼</span>
       </header>
       <div class="body">
-        {% if license.is_pro %}
-          <p class="help" style="margin-top: 0;">
-            Pro license active. Thanks for supporting Ducky Pool 🦆
-          </p>
-          <div class="grid-3" style="grid-template-columns: 1fr 1fr; max-width: 520px;">
-            <div class="field" style="margin-bottom: 0;">
-              <label>Email</label>
-              <div class="mono" style="padding: 0.5rem 0.75rem; background: var(--panel-soft); border: 1px solid var(--border); border-radius: 8px; font-size: 0.85rem; word-break: break-all;">{{ license.email }}</div>
-            </div>
-            <div class="field" style="margin-bottom: 0;">
-              <label>Tier</label>
-              <div class="mono" style="padding: 0.5rem 0.75rem; background: var(--panel-soft); border: 1px solid var(--border); border-radius: 8px; font-size: 0.85rem;">{{ license.tier }}</div>
-            </div>
+        <p class="help" style="margin-top: 0;">
+          If Ducky Pool has helped you find a block, run a stable solo pool, or just put a smile on your face,
+          consider sending a few sats this way. Funds go directly to development time, hosting test infrastructure,
+          and the occasional pizza.
+        </p>
+        <div style="margin-top: 0.85rem; padding: 0.85rem 1rem; background: var(--panel-soft); border: 1px solid var(--border); border-radius: 8px;">
+          <div style="font-size: 0.74rem; color: var(--muted); margin-bottom: 0.4rem; font-weight: 500;">
+            Bitcoin Cash address
           </div>
-          <form method="post" action="{{ url_for('license_clear') }}" style="margin-top: 0.85rem;" onsubmit="return confirm('Remove this license and revert to Free tier? Your customizations stay, but Discord webhooks stop firing and Miners table caps at {{ free_tier_max_miners }}.');">
-            <button type="submit" class="ghost">Remove license</button>
-          </form>
-        {% else %}
-          {% if license.has_token %}
-            <div class="note" style="margin-top: 0;">
-              <span class="label">Invalid</span>
-              The current license key didn't validate. Either it's been mistyped, the
-              dashboard was upgraded with a rotated secret, or the key was issued for a
-              different install. Paste a fresh key or remove it.
-            </div>
-          {% endif %}
-
-          <!-- Live tier usage -->
-          {% if license_rejected_names %}
-            <div class="note" style="margin-top: 0; border-color: var(--error, #ff6b6b); background: rgba(255,107,107,0.06);">
-              <span class="label" style="color: var(--error, #ff6b6b);">Rejecting now</span>
-              <strong>{{ license_workers_active }} of {{ free_tier_max_miners }} miner slots in use.</strong>
-              {{ license_rejected_names|length }} miner{{ 's' if license_rejected_names|length != 1 else '' }} currently being rejected from the pool:
-              <div style="margin-top: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.4rem;">
-                {% for name in license_rejected_names %}
-                  <span class="mono" style="padding: 0.2rem 0.55rem; background: rgba(255,107,107,0.12); border: 1px solid rgba(255,107,107,0.3); border-radius: 6px; font-size: 0.78rem;">🔒 {{ name }}</span>
-                {% endfor %}
-              </div>
-              <div class="flb-sub" style="margin-top: 0.5rem; font-size: 0.78rem; color: var(--muted);">
-                These miners can't submit shares until you upgrade. They'll keep retrying.
-              </div>
-            </div>
-          {% else %}
-            <p class="help" style="margin-top: 0;">
-              <strong>Free tier active.</strong>
-              {% if license_workers_total == 0 %}
-                No miners connected yet — you can run up to {{ free_tier_max_miners }} on free tier.
-              {% else %}
-                {{ license_workers_total }} of {{ free_tier_max_miners }} miner slots in use.
-              {% endif %}
-              Pro adds: unlimited miners, Discord webhooks, custom block signature, theme customization, and future features.
-            </p>
-          {% endif %}
-
-          <p class="help" style="margin-top: 0.4rem;">
-            Get a license: <strong>£35 one-time</strong> at
-            <a href="{{ purchase_url }}" target="_blank" rel="noopener">{{ purchase_url }}</a>.
-            After purchase, paste the key you received below.
-          </p>
-
-          <form method="post" action="{{ url_for('license_save') }}" style="margin-top: 0.85rem;">
-            <div class="field" style="margin-bottom: 0.5rem;">
-              <label for="license_token">License key</label>
-              <input id="license_token" name="token" type="text"
-                     placeholder="Paste your license key here…"
-                     style="font-family: ui-monospace, monospace; font-size: 0.78rem;">
-              <div class="field-help">
-                Looks like <span class="mono">aGVsbG9...</span>.<span class="mono">f9a3...</span> — case-sensitive,
-                copy it whole including the dot in the middle.
-              </div>
-            </div>
-            <div class="actions-bar" style="margin-top: 0.85rem;">
-              <button type="submit">Activate Pro</button>
-              <a href="{{ purchase_url }}" target="_blank" rel="noopener" class="ghost"
-                 style="text-decoration: none; padding: 0.5rem 1.1rem; border: 1px solid var(--border); border-radius: 8px; color: var(--fg); font-size: 0.86rem;">
-                Buy a license ↗
-              </a>
-            </div>
-          </form>
-        {% endif %}
+          <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+            <code class="mono" style="flex: 1; min-width: 0; padding: 0.4rem 0.6rem; background: var(--bg); border-radius: 6px; font-size: 0.78rem; word-break: break-all; color: var(--accent);" id="donate-address">{{ donation_address }}</code>
+            <button type="button" class="ghost" id="donate-copy"
+                    style="padding: 0.4rem 0.85rem; font-size: 0.78rem; flex-shrink: 0;">
+              Copy
+            </button>
+          </div>
+          <div style="margin-top: 0.6rem; font-size: 0.74rem; color: var(--muted);">
+            Or scan the QR in the page footer. Thanks 🦆
+          </div>
+        </div>
       </div>
     </div>
     </div><!-- /settings-section: Account -->
 
+    <form method="post" action="{{ url_for('settings_save') }}" autocomplete="off">
+
     <!-- ── Section: Pool ───────────────────────────────────────── -->
     <div class="settings-section">
       <h3 class="settings-section-label">Pool</h3>
-
-    <form method="post" action="{{ url_for('settings_save') }}" autocomplete="off">
 
       <!-- Stratum difficulty (default collapsed — set once, ignore) -->
       <div class="card" data-card="stratum-diff" data-default-collapsed="true">
@@ -927,69 +785,50 @@
         </div>
       </div>
 
-      <!-- Block signature (Pro feature) -->
+      <!-- Block signature -->
       <div class="card" data-card="block-sig" data-default-collapsed="true">
         <header class="collapsible">
-          <span class="row-icon {{ 'accent' if license.is_pro and settings.pro.coinbase_suffix else '' }}" aria-hidden="true">
+          <span class="row-icon {{ 'accent' if settings.coinbase_suffix else '' }}" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17c3.333 -2 5 -4 5 -6c0 -3 -1 -3 -2 -3s-2.032 1.085 -2 3c.034 2.048 1.658 2.877 2.5 4c1.5 2 2.5 2.5 3.5 1l2 -3"/><path d="M3 21h18"/><path d="M14 18l1.5 -1.5"/><path d="M18 14l1 -1"/></svg>
           </span>
           <span class="row-main">
             <span class="row-title">
               Block signature
-              {% if not license.is_pro %}
-                <span class="row-pill pro">Pro</span>
-              {% elif settings.pro.coinbase_suffix %}
+              {% set _suffix = settings.coinbase_suffix or '' %}
+              {% if _suffix %}
                 <span class="row-pill ok">Custom</span>
               {% else %}
                 <span class="row-pill dim">Default</span>
               {% endif %}
             </span>
-            <span class="row-summary">{% if settings.pro.coinbase_suffix %}/mined by {{ settings.pro.coinbase_suffix }} on Ducky Pool/{% else %}/mined on Ducky Pool/{% endif %}</span>
+            <span class="row-summary">{% if _suffix %}/mined by {{ _suffix }} on Ducky Pool/{% else %}/mined on Ducky Pool/{% endif %}</span>
           </span>
           <span class="chevron" aria-hidden="true">▼</span>
         </header>
         <div class="body">
-          {% if not license.is_pro %}
-            <div class="note" style="margin-top: 0; border-color: var(--accent);">
-              <span class="label" style="color: var(--accent);">Pro</span>
-              Personalize the signature baked into blocks your pool finds.
-              On free tier, blocks are signed
-              <span class="mono">/mined on Ducky Pool/</span>.
-              With Pro, you can put your own name in:
-              <span class="mono">/mined by YourName on Ducky Pool/</span> —
-              a permanent mark on the blockchain that's yours forever.
-              <br><br>
-              <a href="#license">Activate Pro</a> to unlock.
-            </div>
-          {% else %}
-            <p class="help" style="margin-top: 0;">
-              Add a personal suffix to the coinbase signature of any block your pool finds.
-              This text is permanently embedded in the blockchain — a small bit of immortality.
-              Saving this restarts ckpool (~10s, miners reconnect automatically).
-            </p>
-          {% endif %}
+          <p class="help" style="margin-top: 0;">
+            Add a personal suffix to the coinbase signature of any block your pool finds.
+            This text is permanently embedded in the blockchain — a small bit of immortality.
+            Saving this restarts ckpool (~10s, miners reconnect automatically).
+          </p>
 
           <div class="field" style="margin-top: 0.85rem;">
             <label for="coinbase_suffix">
               Suffix
-              {% if license.is_pro %}
-                <span style="font-weight: 400; color: var(--muted); font-size: 0.78rem;">
-                  — letters, numbers, space, dash, underscore. Max 20 chars.
-                </span>
-              {% endif %}
+              <span style="font-weight: 400; color: var(--muted); font-size: 0.78rem;">
+                — letters, numbers, space, dash, underscore. Max 20 chars.
+              </span>
             </label>
             <input id="coinbase_suffix" name="coinbase_suffix" type="text"
-                   value="{{ settings.pro.coinbase_suffix }}"
+                   value="{{ _suffix }}"
                    maxlength="20"
                    pattern="[A-Za-z0-9 _\-]*"
-                   {% if not license.is_pro %}disabled placeholder="Pro feature — activate Pro to use"{% else %}placeholder="e.g. Ducky"{% endif %}>
-            {% if license.is_pro %}
-              <div class="field-help" style="display: flex; justify-content: flex-end; gap: 0.5rem;">
-                <span class="mono" style="color: var(--muted);" id="sig-counter">
-                  {{ (settings.pro.coinbase_suffix|length) }} / 20
-                </span>
-              </div>
-            {% endif %}
+                   placeholder="e.g. Ducky">
+            <div class="field-help" style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+              <span class="mono" style="color: var(--muted);" id="sig-counter">
+                {{ _suffix|length }} / 20
+              </span>
+            </div>
           </div>
 
           <!-- Live preview of what the next found block will be signed with. -->
@@ -998,7 +837,7 @@
               Preview · next block your pool finds will be signed:
             </div>
             <div style="background: var(--panel-soft); border: 1px solid var(--border); border-radius: 8px; padding: 0.85rem 1rem; font-family: ui-monospace, monospace; font-size: 0.92rem; color: var(--accent); word-break: break-all; line-height: 1.4;" id="sig-preview-wrap">
-              <span id="sig-preview">{% if settings.pro.coinbase_suffix %}/mined by {{ settings.pro.coinbase_suffix }} on Ducky Pool/{% else %}/mined on Ducky Pool/{% endif %}</span>
+              <span id="sig-preview">{% if _suffix %}/mined by {{ _suffix }} on Ducky Pool/{% else %}/mined on Ducky Pool/{% endif %}</span>
             </div>
             <div style="font-size: 0.74rem; color: var(--muted); margin-top: 0.5rem;">
               In a block explorer's Scriptsig field this appears with a few binary
@@ -1069,8 +908,7 @@
           <span class="row-main">
             <span class="row-title">
               Discord webhook
-              {% if not license.is_pro %}<span class="row-pill pro">Pro</span>
-              {% elif settings.discord.webhook_url %}<span class="row-pill ok">Active</span>
+              {% if settings.discord.webhook_url %}<span class="row-pill ok">Active</span>
               {% else %}<span class="row-pill dim">Off</span>{% endif %}
             </span>
             <span class="row-summary prose">
@@ -1082,21 +920,13 @@
             </span>
           </span>
           <span class="row-aux">
-            {% if license.is_pro and settings.discord.webhook_url %}
+            {% if settings.discord.webhook_url %}
               <button type="button" class="row-action-btn" onclick="event.stopPropagation(); document.getElementById('inline-webhook-test').submit();">Test</button>
             {% endif %}
           </span>
           <span class="chevron" aria-hidden="true">▼</span>
         </header>
         <div class="body">
-          {% if not license.is_pro %}
-          <div class="note" style="margin-top: 0; border-color: var(--accent);">
-            <span class="label" style="color: var(--accent);">Pro</span>
-            Discord webhooks are a Pro feature. You can edit the URL below and it'll be saved,
-            but webhooks won't fire until you
-            <a href="#license">activate a Pro license</a>.
-          </div>
-          {% endif %}
           <div class="field">
             <label for="webhook_url">Webhook URL</label>
             <input id="webhook_url" name="webhook_url" type="url"
@@ -1340,7 +1170,7 @@
       <form id="inline-logout" method="post" action="{{ url_for('logout') }}" style="display: none;"></form>
     {% endif %}
 
-    {% if license.is_pro and settings.discord.webhook_url %}
+    {% if settings.discord.webhook_url %}
       <form id="inline-webhook-test" method="post" action="{{ url_for('test_webhook') }}" style="display: none;"></form>
     {% endif %}
 
@@ -1355,8 +1185,13 @@
       <span class="footer-version">v{{ footer_version }}</span>
       <span class="footer-sep" aria-hidden="true">·</span>
       <a class="footer-link" href="{{ footer_github }}" target="_blank" rel="noopener">GitHub ↗</a>
+      <span class="footer-sep" aria-hidden="true">·</span>
+      <a class="footer-link footer-donate" href="#" onclick="event.preventDefault(); document.getElementById('donate-modal').showModal();" title="Support development">💚 Donate BCH</a>
     </div>
   </footer>
+
+  <!-- Donation modal — shared across all pages -->
+  {% include "_donate_modal.html" ignore missing %}
 
   <script>
   // Separate localStorage namespace so settings collapse choices don't
@@ -1633,10 +1468,9 @@
   // ── Tier editor — add/remove/reset ───────────────────────────
   (function() {
     const list = document.getElementById('tier-rows');
-    const tpl  = document.getElementById('tier-row-template');
     const addBtn   = document.getElementById('tier-add');
     const resetBtn = document.getElementById('tier-reset');
-    if (!list || !tpl || !addBtn) return;
+    if (!list || !addBtn) return;
 
     // Default tier list lives server-side too — embedded here so the
     // Reset button works without a round-trip. Keep this in sync with
@@ -1676,14 +1510,99 @@
     }
 
     function makeRow(t) {
-      const node = tpl.content.firstElementChild.cloneNode(true);
-      node.querySelector('input[name="tier_min"]').value    = (t && t.min_h) || '';
-      node.querySelector('input[name="tier_emoji"]').value  = (t && t.emoji) || '🦆';
-      node.querySelector('input[name="tier_label"]').value  = (t && t.label) || '';
-      node.querySelector('input[name="tier_flavor"]').value = (t && t.flavor) || '';
-      node.querySelector('input[name="tier_color"]').value  = (t && t.color) || '';
-      bindRow(node);
-      return node;
+      // Build the row element imperatively rather than cloning a
+      // <template>. The cloning approach was reportedly losing inputs
+      // in some browser/extension combinations — this version is
+      // straightforward DOM creation with no template indirection.
+      t = t || {};
+
+      const row = document.createElement('div');
+      row.className = 'tier-row';
+
+      const fields = document.createElement('div');
+      fields.className = 'tier-fields';
+      row.appendChild(fields);
+
+      function makeField(klass, labelText, inputBuilder) {
+        const label = document.createElement('label');
+        label.className = 'tier-field ' + klass;
+        const span = document.createElement('span');
+        span.className = 'tier-label-text';
+        span.textContent = labelText;
+        label.appendChild(span);
+        const input = inputBuilder();
+        label.appendChild(input);
+        fields.appendChild(label);
+        return input;
+      }
+
+      // Threshold ≥
+      makeField('tier-min', 'Threshold ≥', () => {
+        const i = document.createElement('input');
+        i.type = 'text'; i.name = 'tier_min';
+        i.value = t.min_h || '';
+        i.placeholder = '0';
+        return i;
+      });
+      // Emoji
+      makeField('tier-emoji', 'Emoji', () => {
+        const i = document.createElement('input');
+        i.type = 'text'; i.name = 'tier_emoji';
+        i.value = t.emoji || '🦆';
+        i.maxLength = 8;
+        return i;
+      });
+      // Label  (NOT marked required — we validate server-side and warn
+      // in the submit handler instead, so dynamically-added rows don't
+      // trip browser validation oddities)
+      makeField('tier-label-input', 'Label', () => {
+        const i = document.createElement('input');
+        i.type = 'text'; i.name = 'tier_label';
+        i.value = t.label || '';
+        i.maxLength = 40;
+        return i;
+      });
+      // Flavor
+      makeField('tier-flavor', 'Flavor message', () => {
+        const i = document.createElement('input');
+        i.type = 'text'; i.name = 'tier_flavor';
+        i.value = t.flavor || '';
+        i.maxLength = 120;
+        return i;
+      });
+      // Color combo (swatch + hex text)
+      const colorLabel = document.createElement('label');
+      colorLabel.className = 'tier-field tier-color';
+      const colorSpan = document.createElement('span');
+      colorSpan.className = 'tier-label-text';
+      colorSpan.textContent = 'Color';
+      colorLabel.appendChild(colorSpan);
+      const colorCombo = document.createElement('div');
+      colorCombo.className = 'tier-color-combo';
+      const swatch = document.createElement('input');
+      swatch.type = 'color'; swatch.className = 'tier-color-swatch';
+      swatch.value = '#' + (t.color || '5b6675');
+      swatch.setAttribute('aria-label', 'Pick color');
+      colorCombo.appendChild(swatch);
+      const hexInput = document.createElement('input');
+      hexInput.type = 'text'; hexInput.name = 'tier_color';
+      hexInput.value = t.color || '';
+      hexInput.maxLength = 6;
+      hexInput.placeholder = '5b8aa6';
+      colorCombo.appendChild(hexInput);
+      colorLabel.appendChild(colorCombo);
+      fields.appendChild(colorLabel);
+
+      // Remove button
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'ghost tier-remove';
+      removeBtn.title = 'Remove tier';
+      removeBtn.textContent = '×';
+      row.appendChild(removeBtn);
+
+      bindRow(row);
+      return row;
     }
 
     // Bind existing server-rendered rows
@@ -1696,6 +1615,36 @@
         if (!confirm('Reset all tiers to the built-in defaults? Your custom labels and thresholds will be lost.')) return;
         list.innerHTML = '';
         DEFAULT_TIERS.forEach(t => list.appendChild(makeRow(t)));
+      });
+    }
+
+    // Diagnostic — log what we're about to submit. Open browser DevTools
+    // (F12 → Console) before clicking Save to see exactly what tiers are
+    // being sent. This catches the most common cause of "tier disappeared"
+    // bugs: the browser silently dropped a row whose label was blank,
+    // or the JS clone didn't wire up the inputs correctly.
+    const settingsForm = list.closest('form');
+    if (settingsForm) {
+      settingsForm.addEventListener('submit', (e) => {
+        const fd = new FormData(settingsForm);
+        const labels = fd.getAll('tier_label');
+        const mins = fd.getAll('tier_min');
+        console.log('[ducky-settings] submitting', labels.length, 'tiers');
+        labels.forEach((lbl, i) => {
+          console.log(`  [${i}] label=${JSON.stringify(lbl)}, min=${JSON.stringify(mins[i])}`);
+        });
+        // Catch the most common silent-drop case: a row with an empty
+        // label. The browser's `required` check should catch this, but
+        // some browsers/extensions skip dynamically-added inputs.
+        const blankIdx = labels.findIndex(l => !String(l).trim());
+        if (blankIdx >= 0) {
+          e.preventDefault();
+          alert(
+            'Tier #' + (blankIdx + 1) + ' has no label — fill it in or click × to remove it.\n\n' +
+            'Empty tiers would be silently dropped on save.'
+          );
+          return false;
+        }
       });
     }
   })();
