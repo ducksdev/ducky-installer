@@ -595,21 +595,33 @@
       font-weight: 500;
       letter-spacing: 0.01em;
     }
-    /* Mobile worker-card variant — uses the same .duck-track + .duck-dot
-       + .duck-bread classes as the Duck-O-Meter section, plus tier
-       label / flavor text. */
+    /* Mobile worker-card variant — embedded progress block using the
+       Direction-A bar style. Sibling of .duck-card but with its own
+       layout to fit inside the per-worker mobile card. */
     .pond-full {
       display: grid;
       grid-template-columns: 1fr auto;
       align-items: center;
-      gap: 0.4rem 0.6rem;
-      background: linear-gradient(180deg, transparent 0%, rgba(91,138,166,0.06) 100%);
+      gap: 0.3rem 0.6rem;
+      background: rgba(91,138,166,0.06);
       border-radius: 6px; padding: 0.5rem 0.6rem;
       margin: 0.4rem 0;
     }
     .pond-full .duck-track {
       grid-column: 1 / span 2;
-      width: auto;
+      width: 100%;
+      height: 5px;
+      background: rgba(91, 138, 166, 0.18);
+      border-radius: 3px;
+      position: relative;
+      overflow: hidden;
+      margin-top: 0.15rem;
+    }
+    .pond-full .duck-fill {
+      position: absolute; left: 0; top: 0; bottom: 0;
+      background: var(--accent);
+      border-radius: 3px;
+      transition: width 0.6s ease-out;
     }
     .pond-full .pond-label {
       font-size: 0.78rem; color: var(--fg); font-weight: 500;
@@ -621,11 +633,11 @@
     .pond-full .pond-pct {
       grid-column: 2;
       font-family: ui-monospace, monospace;
-      font-size: 0.7rem; color: var(--muted);
+      font-size: 0.74rem; color: var(--accent);
       align-self: start;
     }
 
-    /* ── Duck-O-Meter (slim list above miners table) ────────────── */
+    /* ── Block progress (slim list above miners table) ─────────── */
     .duck-o-meters {
       display: flex;
       flex-direction: column;
@@ -633,9 +645,9 @@
     }
     .duck-card {
       display: grid;
-      /* name | tier | pond bar | percentage — fixed widths so every
-         pond starts at the same x position regardless of name length. */
-      grid-template-columns: 160px 150px 1fr 90px;
+      /* name | tier chip | progress bar | percentage — fixed widths so
+         every bar starts at the same x position regardless of name length. */
+      grid-template-columns: 160px 130px 1fr 90px;
       align-items: center;
       gap: 0.85rem;
       padding: 0.55rem 0.5rem;
@@ -647,38 +659,34 @@
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .duck-card .duck-tier {
-      font-size: 0.8rem; color: var(--accent);
-      font-weight: 500; letter-spacing: 0.01em;
+      display: inline-flex; align-items: center; gap: 0.35rem;
+      font-size: 0.74rem;
+      padding: 2px 8px;
+      background: rgba(91, 138, 166, 0.12);
+      color: var(--muted);
+      border-radius: 999px;
+      width: fit-content;
+      max-width: 100%;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .duck-card .duck-tier.has-progress {
+      background: rgba(249, 168, 37, 0.15);
+      color: var(--accent);
     }
     .duck-card .duck-track {
       position: relative;
       width: 100%;
-      height: 4px;
-      background: rgba(91, 138, 166, 0.22);
-      border-radius: 999px;
-      /* Reserve room on the right for the bread emoji so the duck dot
-         doesn't visually overlap it at progress01 ≈ 1.0. */
-      margin-right: 22px;
+      height: 6px;
+      background: rgba(91, 138, 166, 0.15);
+      border-radius: 3px;
+      overflow: hidden;
     }
-    .duck-card .duck-dot {
+    .duck-card .duck-fill {
       position: absolute;
-      top: 50%;
-      width: 12px; height: 12px;
-      background: #f9a825;
-      border: 1.5px solid #c77800;
-      border-radius: 50%;
-      transform: translate(-50%, -50%);
-      transition: left 0.6s ease-out;
-      box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
-    }
-    .duck-card .duck-bread {
-      position: absolute;
-      right: -22px;
-      top: 50%;
-      transform: translateY(-50%);
-      font-size: 16px;
-      line-height: 1;
+      left: 0; top: 0; bottom: 0;
+      background: var(--accent);
+      border-radius: 3px;
+      transition: width 0.6s ease-out;
     }
     .duck-card .duck-pct {
       font-size: 0.82rem; color: var(--accent); font-weight: 500;
@@ -691,21 +699,27 @@
     .duck-card .duck-stats { display: none; }
 
     /* On narrow screens, collapse to a 2-row layout per worker so
-       names don't truncate too aggressively but tracks still align. */
+       names don't truncate too aggressively but bars still align. */
     @media (max-width: 720px) {
       .duck-card {
         grid-template-columns: 1fr 80px;
-        grid-template-rows: auto auto;
+        grid-template-rows: auto auto auto;
         gap: 0.3rem 0.6rem;
         padding: 0.6rem 0.4rem;
       }
       .duck-card .duck-name { grid-column: 1; grid-row: 1; }
       .duck-card .duck-tier {
         grid-column: 2; grid-row: 1;
+        justify-self: end;
+        font-size: 0.7rem;
+      }
+      .duck-card .duck-track {
+        grid-column: 1 / span 2; grid-row: 2;
+      }
+      .duck-card .duck-pct {
+        grid-column: 1 / span 2; grid-row: 3;
         text-align: right; font-size: 0.74rem;
       }
-      .duck-card .duck-track { grid-column: 1; grid-row: 2; }
-      .duck-card .duck-pct { grid-column: 2; grid-row: 2; }
     }
 
     /* ── blocks ────────────────────────────────────────────────── */
@@ -855,23 +869,24 @@
           </div>
         </div>
 
-        <!-- Duck-O-Meter — headline card per worker -->
+        <!-- Block progress — headline card per worker -->
         <div class="card" data-card="duck-o-meter"{% if not workers %} style="display: none;"{% endif %}>
           <header class="collapsible">
-            <h2>Duck-O-Meter</h2>
+            <h2>Block progress</h2>
             <span class="chevron">▼</span>
           </header>
           <div class="body">
             <div class="duck-o-meters" id="duck-o-meters-body">
               {% for w in workers %}
+                {% set _pct = w.progress_pct or 0 %}
+                {% set _bar = [_pct, 100]|min %}
                 <div class="duck-card" data-worker="{{ w.id }}">
                   <span class="duck-name">{{ w.name }}</span>
-                  <span class="duck-tier">{{ w.stage_emoji }} {{ w.stage_label }}</span>
+                  <span class="duck-tier{% if _pct > 0 %} has-progress{% endif %}">{{ w.stage_emoji }} {{ w.stage_label }}</span>
                   <div class="duck-track">
-                    <div class="duck-dot" style="left: {{ ((w.progress01 or 0) * 100)|round(2) }}%;"></div>
-                    <span class="duck-bread">🍞</span>
+                    <div class="duck-fill" style="width: {{ _bar|round(4) }}%;"></div>
                   </div>
-                  <span class="duck-pct">{{ "%.4f"|format(w.progress_pct or 0) }}%</span>
+                  <span class="duck-pct">{% if _pct > 0 %}{{ "%.4f"|format(_pct) }}%{% else %}—{% endif %}</span>
                 </div>
               {% endfor %}
             </div>
@@ -941,10 +956,6 @@
                       </div>
                       {% if w.stage_level and w.stage_level > 0 %}
                         <div class="pond-full">
-                          <div class="duck-track">
-                            <div class="duck-dot" style="left: {{ ((w.progress01 or 0) * 100)|round(2) }}%;"></div>
-                            <span class="duck-bread">🍞</span>
-                          </div>
                           <div>
                             <span class="pond-label">{{ w.stage_emoji }} {{ w.stage_label }}</span>
                             <span class="pond-flavor">{{ w.stage_flavor }}</span>
@@ -952,6 +963,10 @@
                           {% if w.progress_pct and w.progress_pct > 0 %}
                             <span class="pond-pct">{{ "%.4f"|format(w.progress_pct) }}%</span>
                           {% endif %}
+                          <div class="duck-track">
+                            {% set _bar = [w.progress_pct or 0, 100]|min %}
+                            <div class="duck-fill" style="width: {{ _bar|round(4) }}%;"></div>
+                          </div>
                         </div>
                       {% endif %}
                       <div class="stats-row">
@@ -1360,16 +1375,13 @@
       <p class="help">Latest: ${link}${worker}</p>`;
   }
 
-  // ───── duck track ─────
-  // Renders a thin progress track with a yellow duck dot floating along
-  // it toward a bread emoji at the right end. Replaces the heavier SVG
-  // pond renderer that lived here previously.
-  function duckTrack(progress01) {
-    const p = Math.max(0, Math.min(1, Number(progress01) || 0));
-    const pct = (p * 100).toFixed(2);
+  // ───── progress bar ─────
+  // Renders a clean progress bar showing actual % to network difficulty.
+  // The fill width comes from progress_pct directly (capped at 100).
+  function progressBar(progressPct) {
+    const pct = Math.max(0, Math.min(100, Number(progressPct) || 0));
     return `<div class="duck-track">
-      <div class="duck-dot" style="left: ${pct}%;"></div>
-      <span class="duck-bread">🍞</span>
+      <div class="duck-fill" style="width: ${pct.toFixed(4)}%;"></div>
     </div>`;
   }
 
@@ -1388,14 +1400,13 @@
     return workers.map(w => {
       const tier = w.stage_label || 'Empty pond';
       const emoji = w.stage_emoji || '🦆';
-      const pct = (w.progress_pct && w.progress_pct > 0)
-        ? Number(w.progress_pct).toFixed(4) + '%'
-        : '—';
-      const progress01 = (typeof w.progress01 === 'number') ? w.progress01 : 0;
+      const rawPct = Number(w.progress_pct) || 0;
+      const pct = rawPct > 0 ? rawPct.toFixed(4) + '%' : '—';
+      const tierClass = rawPct > 0 ? 'duck-tier has-progress' : 'duck-tier';
       return `<div class="duck-card" data-worker="${escapeHtml(w.id)}">
         <span class="duck-name">${escapeHtml(w.name)}</span>
-        <span class="duck-tier">${emoji} ${escapeHtml(tier)}</span>
-        ${duckTrack(progress01)}
+        <span class="${tierClass}">${emoji} ${escapeHtml(tier)}</span>
+        ${progressBar(rawPct)}
         <span class="duck-pct">${pct}</span>
       </div>`;
     }).join('');
@@ -1442,15 +1453,15 @@
       const pctText = (w.progress_pct && w.progress_pct > 0)
         ? `<span class="pond-pct">${Number(w.progress_pct).toFixed(4)}%</span>`
         : '';
-      const progress01 = (typeof w.progress01 === 'number') ? w.progress01 : 0;
+      const rawPct = Number(w.progress_pct) || 0;
       const pondBlock = (w.stage_level || 0) > 0
         ? `<div class="pond-full">
-             ${duckTrack(progress01)}
              <div>
                <span class="pond-label">${w.stage_emoji || ''} ${escapeHtml(w.stage_label || '')}</span>
                <span class="pond-flavor">${escapeHtml(w.stage_flavor || '')}</span>
              </div>
              ${pctText}
+             ${progressBar(rawPct)}
            </div>`
         : '';
       return `<div class="miner-card">
