@@ -297,7 +297,11 @@ services:
       - "${P2P_PORT}:8333"
 
   ckpool:
-    image: ghcr.io/willitmod/wim-solo-ckpool:0.8.3-rc1-590fb2a
+    # Our image — a thin re-tagged wrapper around the upstream
+    # wim-solo-ckpool. Same binaries, our namespace + provenance labels.
+    # Build pipeline: .github/workflows/publish-ckpool.yml
+    # Source / lineage: ckpool/README.md and ckpool/NOTICE.md
+    image: ghcr.io/ducksdev/ducky-pool-ckpool:0.8.3-rc1-590fb2a
     container_name: ducky-ckpool
     restart: unless-stopped
     stop_grace_period: 30s
