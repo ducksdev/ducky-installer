@@ -193,8 +193,7 @@ DEFAULT_SETTINGS = {
     # Optional dashboard password protection. When disabled (default),
     # the dashboard and admin actions are open to anyone who can reach
     # the web port — fine for LAN-only setups, dangerous if exposed.
-    # /public stays unauthenticated regardless. Password is stored as a
-    # bcrypt hash; the plaintext never touches disk.
+    # Password is stored as a bcrypt hash; the plaintext never touches disk.
     "auth": {
         "enabled": False,
         "password_hash": "",
@@ -571,8 +570,7 @@ def save_settings(new: dict) -> None:
 #
 # Optional single-password dashboard auth. Off by default. When on, all
 # admin routes + the main dashboard require a session cookie set by
-# /login. /public and /api/public/stats are intentionally exempt — they
-# exist so anyone can be shown a read-only view safely.
+# /login. Only /login itself is exempt.
 #
 # Threat model: this stops casual snooping if the dashboard is exposed
 # (port forward, accidental public binding). It does NOT defend against:
@@ -2645,9 +2643,9 @@ def _update_pool_best_trackers(workers: list[dict], blocks_count: int,
     return out
 
 
-def _build_stats_payload(public: bool = False) -> dict:
-    """Shared stats payload for /api/stats and /api/public/stats. The
-    public variant strips fields a stranger shouldn't see."""
+def _build_stats_payload() -> dict:
+    """Stats payload for /api/stats. Always returns the full set of
+    fields — the public read-only variant has been removed."""
     pool = get_pool_stats()
     blocks = get_blocks_summary()
     net_diff = get_network_difficulty()
@@ -2713,10 +2711,9 @@ def _build_stats_payload(public: bool = False) -> dict:
     payload["workers_total"] = full_count
     payload["workers_visible"] = full_count
 
-    if not public:
-        s = load_settings()
-        payload["payout"] = read_payout()
-        payload["webhook_set"] = bool(s["discord"]["webhook_url"])
+    s = load_settings()
+    payload["payout"] = read_payout()
+    payload["webhook_set"] = bool(s["discord"]["webhook_url"])
     return payload
 
 
@@ -2765,13 +2762,12 @@ def logout():
 @login_required
 def index():
     settings = load_settings()
-    payload = _build_stats_payload(public=False)
+    payload = _build_stats_payload()
     payout = read_payout()
     host = request.host.split(":")[0] or socket.gethostname()
     stratum_url = f"stratum+tcp://{host}:{STRATUM_PORT}"
     return render_template(
         "index.html",
-        public=False,
         status=payload["node"],
         pool=payload["pool"],
         workers=payload["workers"],
@@ -2788,40 +2784,10 @@ def index():
     )
 
 
-@app.route("/public", methods=["GET"])
-def public_view():
-    """Read-only public dashboard. Hides payout address, settings link,
-    and admin actions (reset/wipe/forget). Always reachable."""
-    payload = _build_stats_payload(public=True)
-    host = request.host.split(":")[0] or socket.gethostname()
-    stratum_url = f"stratum+tcp://{host}:{STRATUM_PORT}"
-    return render_template(
-        "index.html",
-        public=True,
-        status=payload["node"],
-        pool=payload["pool"],
-        workers=payload["workers"],
-        workers_total=payload.get("workers_total", 0),
-        workers_visible=payload.get("workers_visible", 0),
-        blocks=payload["blocks"],
-        eta=payload["eta"],
-        net_diff_human=payload["net_diff_human"],
-        payout="",                # never send to public template
-        stratum_url=stratum_url,
-        stratum_port=STRATUM_PORT,
-        webhook_set=False,
-    )
-
-
 @app.route("/api/stats", methods=["GET"])
 @login_required_json
 def api_stats():
-    return jsonify(_build_stats_payload(public=False))
-
-
-@app.route("/api/public/stats", methods=["GET"])
-def api_public_stats():
-    return jsonify(_build_stats_payload(public=True))
+    return jsonify(_build_stats_payload())
 
 
 @app.route("/api/history", methods=["GET"])
@@ -3392,7 +3358,6 @@ def test_webhook():
 def health_page():
     return render_template(
         "health.html",
-        public=False,
         auth_enabled=auth_enabled(),
     )
 

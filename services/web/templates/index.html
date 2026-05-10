@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>{% if public %}Ducky Pool · Public{% else %}Ducky Pool{% endif %}</title>
+  <title>Ducky Pool</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><circle cx='32' cy='32' r='32' fill='%230c0e13'/><ellipse cx='38' cy='42' rx='20' ry='14' fill='%23f9a825'/><circle cx='22' cy='26' r='11' fill='%23f9a825'/><path d='M 6 26 L 14 22 L 14 30 Z' fill='%23ff6f00'/><circle cx='20' cy='24' r='1.6' fill='%230c0e13'/></svg>">
   <link rel="apple-touch-icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%230c0e13'/><ellipse cx='38' cy='42' rx='20' ry='14' fill='%23f9a825'/><circle cx='22' cy='26' r='11' fill='%23f9a825'/><path d='M 6 26 L 14 22 L 14 30 Z' fill='%23ff6f00'/><circle cx='20' cy='24' r='1.6' fill='%230c0e13'/></svg>">
@@ -168,15 +168,6 @@
       padding: 1.25rem 1.5rem 3rem;
     }
     .lede { color: var(--muted); margin: 0 0 1rem; font-size: 0.92rem; }
-    .public-banner {
-      background: rgba(76,217,100,0.08);
-      border: 1px solid rgba(76,217,100,0.3);
-      color: var(--success);
-      border-radius: 8px;
-      padding: 0.5rem 0.85rem;
-      margin: 0 0 1rem;
-      font-size: 0.82rem;
-    }
     .grid {
       display: grid;
       grid-template-columns: 1fr 320px;
@@ -770,32 +761,23 @@
             <circle cx="20" cy="24" r="1.6" fill="#0c0e13"/>
             <path d="M 30 28 Q 42 14 56 22 Q 50 26 46 24" fill="none" stroke="#c77800" stroke-width="1.2" opacity="0.4"/>
           </svg>
-          <span>Ducky <span class="accent">Pool</span>{% if public %} <span class="pill ok" style="margin-left: 0.4rem; font-size: 0.62rem; vertical-align: middle;">Public</span>{% endif %}</span>
+          <span>Ducky <span class="accent">Pool</span></span>
         </a>
       </h1>
       <span id="live-indicator" class="live-dot" title="Live — updates every 10s"></span>
       <span class="grow"></span>
-      {% if not public %}
-        <a class="nav" href="{{ url_for('public_view') }}" title="Public read-only view">View as public</a>
-        <a class="nav" href="{{ url_for('health_page') }}" title="System health">⚕ Health</a>
-        <a class="nav" href="{{ url_for('settings_page') }}" title="Settings">⚙ Settings</a>
-        {% if auth_enabled %}
-          <form method="post" action="{{ url_for('logout') }}" style="display: inline; margin: 0;">
-            <button type="submit" class="nav" title="Sign out">Sign out</button>
-          </form>
-        {% endif %}
+      <a class="nav" href="{{ url_for('health_page') }}" title="System health">⚕ Health</a>
+      <a class="nav" href="{{ url_for('settings_page') }}" title="Settings">⚙ Settings</a>
+      {% if auth_enabled %}
+        <form method="post" action="{{ url_for('logout') }}" style="display: inline; margin: 0;">
+          <button type="submit" class="nav" title="Sign out">Sign out</button>
+        </form>
       {% endif %}
     </div>
   </header>
 
   <div class="wrap">
     <p class="lede">Bitcoin Cash full node + solo Stratum pool.</p>
-
-    {% if public %}
-      <div class="public-banner">
-        Public read-only view. Settings, payout address, and admin actions are hidden.
-      </div>
-    {% endif %}
 
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for cat, msg in messages %}
@@ -813,13 +795,11 @@
           <header class="collapsible">
             <h2>Pool stats <span id="pool-pill"></span></h2>
             <div class="actions">
-              {% if not public %}
               <form method="post" action="{{ url_for('reset_stats') }}" style="display: inline;"
                     onsubmit="event.stopPropagation(); return confirm('Reset best shares?\n\nThe Best column for every worker goes to —. The next share each worker submits counts as the new best, and Discord webhooks resume from there. Miners stay connected, no blip, no shares lost.');">
                 <input type="hidden" name="name" value="__pool__">
                 <button type="submit" class="ghost danger" onclick="event.stopPropagation();">Reset stats</button>
               </form>
-              {% endif %}
               <span class="chevron">▼</span>
             </div>
           </header>
@@ -924,7 +904,7 @@
                       <th>Worker</th><th>Status</th><th class="num">Hashrate</th>
                       <th class="num">Best</th>
                       <th class="num">Last seen</th>
-                      {% if not public %}<th></th>{% endif %}
+                      <th></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -944,7 +924,6 @@
                         <td class="num">{{ w.hashrate_1m }}</td>
                         <td class="num">{{ w.best_share }}</td>
                         <td class="num">{{ w.age_human }}</td>
-                        {% if not public %}
                         <td>
                           <div class="row-actions">
                             <form method="post" action="{{ url_for('forget_worker') }}" style="display: inline;"
@@ -954,7 +933,6 @@
                             </form>
                           </div>
                         </td>
-                        {% endif %}
                       </tr>
                     {% endfor %}
                   </tbody>
@@ -989,15 +967,13 @@
                         <div>Best<br><span class="v">{{ w.best_share }}</span></div>
                         <div>Seen<br><span class="v">{{ w.age_human }}</span></div>
                       </div>
-                      {% if not public %}
-                        <div class="actions-row">
-                          <form method="post" action="{{ url_for('forget_worker') }}" style="display: inline;"
-                                onsubmit="return confirm('Hide worker {{ w.name }}?\n\nThe worker will disappear from the dashboard. It auto-reappears if it submits a new share. Miner stays connected, no blip.');">
-                            <input type="hidden" name="name" value="{{ w.id }}">
-                            <button type="submit" class="ghost" title="Hide from dashboard">Hide</button>
-                          </form>
-                        </div>
-                      {% endif %}
+                      <div class="actions-row">
+                        <form method="post" action="{{ url_for('forget_worker') }}" style="display: inline;"
+                              onsubmit="return confirm('Hide worker {{ w.name }}?\n\nThe worker will disappear from the dashboard. It auto-reappears if it submits a new share. Miner stays connected, no blip.');">
+                          <input type="hidden" name="name" value="{{ w.id }}">
+                          <button type="submit" class="ghost" title="Hide from dashboard">Hide</button>
+                        </form>
+                      </div>
                     </div>
                   {% endfor %}
                 </div>
@@ -1081,8 +1057,7 @@
           </div>
         </div>
 
-        {% if not public %}
-        <!-- Payout (private only, default collapsed once set) -->
+        <!-- Payout, default collapsed once set -->
         <div class="card" data-card="payout"{% if payout %} data-default-collapsed="true"{% endif %}>
           <header class="collapsible">
             <h2>Payout
@@ -1127,7 +1102,6 @@
             }
           })();
         </script>
-        {% endif %}
 
       </div>
     </div>
@@ -1143,17 +1117,13 @@
       <span class="footer-version">v{{ footer_version }}</span>
       <span class="footer-sep" aria-hidden="true">·</span>
       <a class="footer-link" href="{{ footer_github }}" target="_blank" rel="noopener">GitHub ↗</a>
-      {% if not public %}
       <span class="footer-sep" aria-hidden="true">·</span>
       <a class="footer-link footer-donate" href="#" onclick="event.preventDefault(); document.getElementById('donate-modal').showModal();" title="Support development">💚 Donate BCH</a>
-      {% endif %}
     </div>
   </footer>
 
   <!-- Donation modal — shared partial -->
-  {% if not public %}
-    {% include "_donate_modal.html" ignore missing %}
-  {% endif %}
+  {% include "_donate_modal.html" ignore missing %}
 
   <!-- Block found celebration overlay. Hidden by default; the
        checkBlockOverlay() JS shows it when blocks.count grows. -->
@@ -1198,10 +1168,9 @@
   <script type="application/json" id="initial-blocks">{{ blocks | tojson | safe }}</script>
 
   <script>
-  const PUBLIC_VIEW = {{ 'true' if public else 'false' }};
-  const STATS_URL   = PUBLIC_VIEW ? '/api/public/stats' : '/api/stats';
+  const STATS_URL   = '/api/stats';
   const POLL_INTERVAL = 10_000;
-  const LS_PREFIX = PUBLIC_VIEW ? 'ducky-public-collapse:' : 'ducky-collapse:';
+  const LS_PREFIX = 'ducky-collapse:';
   const liveDot = document.getElementById('live-indicator');
 
   // ── collapse state ─────────────────────────────────────────────
@@ -1401,7 +1370,6 @@
   }
 
   function workerActions(w) {
-    if (PUBLIC_VIEW) return '';
     const hide = `<form method="post" action="/workers/forget" style="display: inline;"
                          onsubmit="return confirm('Hide worker ${escapeHtml(w.name)}?\\n\\nThe worker will disappear from the dashboard. It auto-reappears if it submits a new share. Miner stays connected, no blip.');">
                     <input type="hidden" name="name" value="${escapeHtml(w.id)}">
@@ -1436,7 +1404,6 @@
       const pill = w.status === 'online' ? '<span class="pill ok">Online</span>'
                  : w.status === 'stale'  ? '<span class="pill warn">Stale</span>'
                  :                          '<span class="pill dim">Offline</span>';
-      const actionCell = PUBLIC_VIEW ? '' : `<td><div class="row-actions">${workerActions(w)}</div></td>`;
       const stage = (w.stage_level || 0) > 0
         ? `<span class="worker-tier" title="${escapeHtml(w.stage_label || '')}">${w.stage_emoji || ''} ${escapeHtml(w.stage_label || '')}</span>`
         : '';
@@ -1446,16 +1413,15 @@
         <td class="num">${escapeHtml(String(w.hashrate_1m))}</td>
         <td class="num">${fmtDiff(w.best_share)}</td>
         <td class="num">${escapeHtml(humaniseAge(w.age_s))}</td>
-        ${actionCell}
+        <td><div class="row-actions">${workerActions(w)}</div></td>
       </tr>`;
     }).join('');
 
-    const adminCol = PUBLIC_VIEW ? '' : '<th></th>';
     const table = `<table class="miners">
       <thead><tr>
         <th>Worker</th><th>Status</th><th class="num">Hashrate</th>
         <th class="num">Best</th>
-        <th class="num">Last seen</th>${adminCol}
+        <th class="num">Last seen</th><th></th>
       </tr></thead><tbody>${rows}</tbody></table>`;
 
     // Mobile card layout
@@ -1463,8 +1429,7 @@
       const pill = w.status === 'online' ? '<span class="pill ok">Online</span>'
                  : w.status === 'stale'  ? '<span class="pill warn">Stale</span>'
                  :                          '<span class="pill dim">Offline</span>';
-      const actionsRow = PUBLIC_VIEW ? '' :
-        `<div class="actions-row">${workerActions(w)}</div>`;
+      const actionsRow = `<div class="actions-row">${workerActions(w)}</div>`;
       const pctText = (w.progress_pct && w.progress_pct > 0)
         ? `<span class="pond-pct">${Number(w.progress_pct).toFixed(4)}%</span>`
         : '';
