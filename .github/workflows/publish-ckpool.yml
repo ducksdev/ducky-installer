@@ -38,6 +38,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Show checkout contents (for debug)
+        run: |
+          echo "=== Files in checkout ==="
+          ls -la
+          echo ""
+          echo "=== ckpool/ directory ==="
+          ls -la ckpool/ || echo "(ckpool directory not found)"
+          echo ""
+          echo "=== Branch / ref info ==="
+          echo "GITHUB_REF=$GITHUB_REF"
+          echo "GITHUB_SHA=$GITHUB_SHA"
+          echo "Working dir: $(pwd)"
+
       - name: Determine version tag
         id: version
         run: |
@@ -49,11 +62,28 @@ jobs:
             VERSION="${GITHUB_REF#refs/tags/ckpool-v}"
             echo "Source: git tag"
           else
-            # Parse 'FROM ghcr.io/.../...:VERSION' from the Dockerfile
+            # Parse 'FROM ghcr.io/.../...:VERSION' from the Dockerfile.
+            # Hard-fail with a clear message if the Dockerfile isn't where
+            # we expect — that means the branch this workflow ran from is
+            # missing the ckpool/ directory.
+            if [ ! -f ckpool/Dockerfile ]; then
+              echo "ERROR: ckpool/Dockerfile not found in checkout."
+              echo "This usually means the workflow ran from a branch that"
+              echo "doesn't have the ckpool/ directory yet. Push ckpool/"
+              echo "to the branch you're triggering from, OR pass an explicit"
+              echo "version_tag input when dispatching."
+              exit 1
+            fi
             VERSION=$(grep -m1 '^FROM ' ckpool/Dockerfile | sed 's/.*://')
             echo "Source: Dockerfile FROM line"
           fi
-          echo "Resolved version: $VERSION"
+          echo "Resolved version: '$VERSION'"
+          if [ -z "$VERSION" ]; then
+            echo "ERROR: VERSION is empty. Cannot publish an image with no tag."
+            echo "Provide a version_tag input when running the workflow,"
+            echo "or check that ckpool/Dockerfile contains a FROM line with a tag."
+            exit 1
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
