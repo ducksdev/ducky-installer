@@ -132,17 +132,6 @@
       color: #ffb1b1; font-size: 0.85rem;
       margin-bottom: 0.9rem;
     }
-    .footer-note {
-      margin-top: 1.1rem; padding-top: 0.9rem;
-      border-top: 1px solid var(--border);
-      font-size: 0.74rem; color: var(--muted);
-      text-align: center;
-    }
-    .footer-note a {
-      color: var(--muted); text-decoration: none;
-      border-bottom: 1px dashed var(--border);
-    }
-    .footer-note a:hover { color: var(--accent); border-color: var(--accent); }
   </style>
 </head>
 <body>
@@ -174,10 +163,6 @@
       </div>
       <button type="submit" class="submit">Sign in</button>
     </form>
-
-    <p class="footer-note">
-      Or view the <a href="{{ url_for('public_view') }}">public read-only dashboard</a>.
-    </p>
   </div>
 </body>
 </html>
