@@ -788,17 +788,28 @@ def reset_baseline(worker_id: str | None) -> int:
         post_reset_best field, so the displayed best climbs naturally
         from the first new share — not from "must beat the old record".
 
+    For a POOL-WIDE reset (worker_id None or '__pool__'), additionally:
+      - Clears the pool_bests.since_block_found counter
+      - Clears the pool_bests.current_block counter
+      - Records ckpool's current all-time bestshare as the "ever floor",
+        so the displayed "ever" value also shows — until a fresh share
+        beats that floor. (We can't actually reset ckpool's pool.status
+        bestshare without restarting ckpool; this is a display-side
+        override that achieves the same user-visible effect.)
+
     This matches AxeBCH's behaviour: hit Reset, the next share counts
     as the new best regardless of magnitude, and subsequent shares
     only update the displayed best when they beat it.
 
     Does NOT restart ckpool or affect the miner connection. The hard
     pool-wide reset (which DOES restart ckpool) is in /stats/reset."""
+    is_pool_wide = worker_id in (None, "__pool__")
+
     with _state_lock:
         data = _load_baselines()
         workers = data["workers"]
 
-        if worker_id in (None, "__pool__"):
+        if is_pool_wide:
             targets = list(set(workers.keys()) | set(_discover_workers_from_disk()))
         else:
             targets = [worker_id]
@@ -818,6 +829,31 @@ def reset_baseline(worker_id: str | None) -> int:
                 "reset_shares": current_shares,  # ckpool shares count at reset
                 "post_reset_best": 0.0,          # highest share seen post-reset
             }
+
+        if is_pool_wide:
+            # Wipe the pool-wide trackers so all 4 Best Share modes show "—"
+            # until fresh shares arrive. Anchor values are bumped to "now"
+            # so _update_pool_best_trackers doesn't immediately backfill
+            # from cur_max on the next tick.
+            pool_stats = get_pool_stats()
+            ckpool_ever = 0.0
+            if pool_stats.get("ok"):
+                try:
+                    ckpool_ever = float(pool_stats.get("best_share_raw", 0) or 0)
+                except (TypeError, ValueError):
+                    ckpool_ever = 0.0
+
+            blocks_now = int(get_blocks_summary().get("count", 0) or 0)
+            node_now = get_node_status()
+            height_now = int(node_now.get("blocks", 0) or 0) if node_now.get("ok") else 0
+
+            pb = data.setdefault("pool_bests", {})
+            pb["since_block_found"] = {"value": 0.0, "anchor_blocks": blocks_now}
+            pb["current_block"] = {"value": 0.0, "anchor_height": height_now}
+            # Record ckpool's all-time bestshare AT reset. The display logic
+            # in _build_stats_payload uses this to decide whether to show
+            # the ckpool-derived "ever" value or "—".
+            pb["ever_floor"] = ckpool_ever
 
         _save_baselines(data)
         return len(targets)
@@ -2673,18 +2709,42 @@ def _build_stats_payload() -> dict:
         except (TypeError, ValueError):
             ever_raw = 0.0
 
+    # Read the "ever floor" recorded at the last pool-wide reset. If
+    # ckpool's reported all-time bestshare hasn't moved past this floor,
+    # the user's still seeing their pre-reset record — suppress it and
+    # show post-reset max instead so the Reset button affects all modes
+    # consistently.
+    ever_floor = 0.0
+    try:
+        with _state_lock:
+            _b = _load_baselines()
+            ever_floor = float(_b.get("pool_bests", {}).get("ever_floor", 0.0) or 0.0)
+    except Exception:  # noqa: BLE001
+        ever_floor = 0.0
+
     # Override pool best_share (the default mode shown) with the max
     # of per-worker post_reset_best — same behaviour as before, so
-    # Reset still clears the displayed value. The other two modes are
-    # available via the new pool["best_shares"] dict.
+    # Reset still clears the displayed value. The other modes are
+    # available via the pool["best_shares"] dict.
     if pool.get("ok"):
         since_reset_raw = max(
             (float(w.get("best_share_raw", 0) or 0) for w in workers),
             default=0.0,
         )
         pool["best_share"] = humanise_diff(since_reset_raw) if since_reset_raw > 0 else "—"
+
+        # "Ever" mode: show ckpool's all-time bestshare only if it
+        # exceeds the floor recorded at reset. Otherwise show the
+        # post-reset max (which goes to "—" until fresh shares arrive).
+        if ever_raw > ever_floor and ever_raw > 0:
+            ever_display = humanise_diff(ever_raw)
+        elif since_reset_raw > 0:
+            ever_display = humanise_diff(since_reset_raw)
+        else:
+            ever_display = "—"
+
         pool["best_shares"] = {
-            "ever": humanise_diff(ever_raw) if ever_raw > 0 else "—",
+            "ever": ever_display,
             "since_block_found": (
                 humanise_diff(pool_bests_raw["since_block_found"])
                 if pool_bests_raw["since_block_found"] > 0 else "—"
@@ -3009,9 +3069,10 @@ def reset_stats():
 
     flash(
         f"Reset complete. Best column cleared for {n} worker"
-        f"{'s' if n != 1 else ''}. The next share submitted by each "
-        "worker counts as the new best — Discord webhooks resume from there. "
-        "Miners stay connected, no shares are lost.",
+        f"{'s' if n != 1 else ''}, and all pool-wide best-share modes "
+        "(all-time, since-block-found, this-network-block) cleared too. "
+        "The next share submitted by each worker counts as the new best — "
+        "Discord webhooks resume from there. Miners stay connected, no shares are lost.",
         "ok",
     )
     return redirect(url_for("index"))

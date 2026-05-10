@@ -797,7 +797,7 @@
             <h2>Pool stats <span id="pool-pill"></span></h2>
             <div class="actions">
               <form method="post" action="{{ url_for('reset_stats') }}" style="display: inline;"
-                    onsubmit="event.stopPropagation(); return confirm('Reset best shares?\n\nThe Best column for every worker goes to —. The next share each worker submits counts as the new best, and Discord webhooks resume from there. Miners stay connected, no blip, no shares lost.');">
+                    onsubmit="event.stopPropagation(); return confirm('Reset best shares?\n\nAll best-share displays go to —: per-worker bests, pool-wide all-time, since-block-found, and this-network-block. The next share each worker submits counts as the new best, and Discord webhooks resume from there. Miners stay connected, no blip, no shares lost.');">
                 <input type="hidden" name="name" value="__pool__">
                 <button type="submit" class="ghost danger" onclick="event.stopPropagation();">Reset stats</button>
               </form>
@@ -823,7 +823,7 @@
                        data-best-ever="{{ pool.best_shares.ever if pool.best_shares else pool.best_share }}"
                        data-best-since-block-found="{{ pool.best_shares.since_block_found if pool.best_shares else pool.best_share }}"
                        data-best-current-block="{{ pool.best_shares.current_block if pool.best_shares else pool.best_share }}"
-                       title="Click to cycle: Since reset → Ever → Since last block → Current block">
+                       title="Click to cycle: Since last reset → All-time → Since pool found block → This network block">
                     <div class="stat-label" id="best-share-label">Best share <span class="best-share-cycle" aria-hidden="true">⟳</span></div>
                     <div class="stat-value" id="best-share-value">{{ pool.best_share }}</div>
                   </div>
@@ -1241,10 +1241,10 @@
   // the pool card we re-apply the user's chosen mode.
   const BEST_SHARE_MODES = ['since_reset', 'ever', 'since_block_found', 'current_block'];
   const BEST_SHARE_LABELS = {
-    since_reset:        'Best share (since reset)',
-    ever:               'Best share (ever)',
-    since_block_found:  'Best share (since last block)',
-    current_block:      'Best share (current block)',
+    since_reset:        'Best share (since last reset)',
+    ever:               'Best share (all-time)',
+    since_block_found:  'Best share (since pool found block)',
+    current_block:      'Best share (this network block)',
   };
   const BEST_SHARE_LS = 'ducky-best-share-mode';
 
@@ -1333,7 +1333,7 @@
              data-best-ever="${escapeHtml(String(p.best_shares ? fmtDiff(p.best_shares.ever) : fmtDiff(p.best_share)))}"
              data-best-since-block-found="${escapeHtml(String(p.best_shares ? fmtDiff(p.best_shares.since_block_found) : fmtDiff(p.best_share)))}"
              data-best-current-block="${escapeHtml(String(p.best_shares ? fmtDiff(p.best_shares.current_block) : fmtDiff(p.best_share)))}"
-             title="Click to cycle: Since reset → Ever → Since last block → Current block">
+             title="Click to cycle: Since last reset → All-time → Since pool found block → This network block">
           <div class="stat-label" id="best-share-label">Best share <span class="best-share-cycle" aria-hidden="true">⟳</span></div>
           <div class="stat-value" id="best-share-value">${fmtDiff(p.best_share)}</div>
         </div>
