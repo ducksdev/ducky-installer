@@ -18,12 +18,15 @@ Runs on any Ubuntu 24.04+ machine. Spin it up on a spare laptop, a home server, 
 - **A solo stratum pool** that hands work to your miners and submits found blocks directly to the network.
 - **A web dashboard** that shows hashrate, best shares, miner status, blocks found, and per-worker progress in real time.
 - **Discord webhook integration** so you get a notification the moment a worker hits a milestone share.
+- **Custom block signature.** When your pool finds a block, you can have the coinbase scriptSig say `/mined by <your-name> on Ducky Pool/` — your message permanently recorded in the BCH blockchain.
+- **Works with rented hashrate.** NiceHash, MiningRigRentals, and any other rental service work the same way as a physical miner — point them at your stratum URL.
 - **No fees, no donations skimmed, no hidden cuts.** 100% of every block reward goes to your address.
 - **Donate-driven, not paywall-gated.** Every feature is free. If the project is useful to you, throw a few sats — but you're never blocked.
 
 ## Who it's for
 
 - Hobbyists running a Bitaxe, NerdMiner, or low-power ASIC at home
+- People who want to take a shot at a block by renting hashrate from NiceHash, MiningRigRentals, etc.
 - Anyone who wants to learn how a mining pool actually works under the hood
 - BCH supporters who want to contribute hashrate independently
 - Tinkerers who'd rather run their own node than point at someone else's
@@ -55,6 +58,38 @@ Set the payout address to wherever you want block rewards sent. Both formats wor
 Point your miners at the stratum URL. Worker name can be anything (it's solo — the address is what matters). Password is `x`.
 
 The BCH node will sync first. The dashboard shows progress and tells you when mining can start. Once synced, point miners and watch shares come in.
+
+### Renting hashrate
+
+NiceHash, MiningRigRentals, and similar services work the same way as a physical miner — they just point at your stratum URL. There's nothing pool-specific to configure on the rental side; from their perspective, your Ducky Pool is just another stratum endpoint.
+
+For rentals to reach your pool, the stratum port must be **reachable from the public internet** (rentals don't connect from inside your LAN). Common ways:
+
+- **Port-forward 4567** on your router to the machine running Ducky Pool, and use your public IP or a dynamic-DNS hostname as the stratum host
+- **Run Ducky Pool on a VPS** with a public IP — no port-forwarding needed
+- **Tunnel it** via Cloudflare Tunnel, Tailscale Funnel, or similar — keeps your home IP private and gives you a stable hostname
+
+Whichever route you pick, point the rental at `stratum+tcp://<your-public-host>:4567`. Set the difficulty appropriately for the rental's hashrate (higher hashrate → higher mindiff, configurable in Settings) so you don't drown in low-difficulty shares.
+
+### Custom block signature
+
+When you find a block, the coinbase transaction's scriptSig records a short message that lives in the chain forever. Ducky Pool lets you set a personal suffix that appears in this signature.
+
+By default it reads:
+
+```
+/mined on Ducky Pool/
+```
+
+If you set a suffix in Settings → "Block signature suffix", it becomes:
+
+```
+/mined by <your-suffix> on Ducky Pool/
+```
+
+Up to 20 characters, printable ASCII only. Pick anything: your handle, your country, your favourite duck, a tribute to someone, a quiet protest. If your pool finds a block, future blockchain explorers and history will record exactly what you wrote.
+
+This is the closest a hobbyist solo miner ever gets to permanently writing on the BCH blockchain. Make it count.
 
 ## Manage
 
