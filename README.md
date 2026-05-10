@@ -1,107 +1,58 @@
-# Ducky Pool
+# Ducky Pool ckpool
 
-Bitcoin Cash full node + solo Stratum pool + web dashboard, in one stack.
-Runs anywhere Ubuntu 24.04+ runs.
+The BCH solo mining pool engine packaged for the [Ducky Pool installer](https://github.com/ducksdev/ducky-installer).
 
-## Install
+## What this image is
 
-On a fresh Ubuntu 24.04+ host:
+A thin wrapper around the upstream `wim-solo-ckpool` Docker image, re-tagged under the `ducksdev` namespace so the Ducky Pool installer can reference a stable URL we control. The runtime binaries are the upstream binaries — we don't recompile or modify them.
+
+## What this image is NOT
+
+- A from-scratch ckpool reimplementation. We rely on years of community work that came before us.
+- A different software product. Functionally it's the same pool engine the upstream image provides.
+- Compatible with anything other than Bitcoin Cash. ckpool was originally BTC-only; the BCH support comes from the upstream chain documented below.
+
+## Lineage
+
+```
+Con Kolivas (ckpool, BTC-only, GPLv3)
+   └─> AxeBCH (added BCH support: CashAddr, BCH coinbase format)
+       └─> WillItMod (wim-solo-ckpool: solo-mining refinements + Docker packaging)
+           └─> ducksdev (this image: thin re-tag for the Ducky Pool installer)
+```
+
+Each step in this chain is a credit-worthy piece of work. Without the upstream, there's no Ducky Pool.
+
+## License
+
+GPLv3, inherited from upstream. This is not a choice — GPLv3 propagates to derivative works. If you fork this image or its packaging, your fork must also be GPLv3.
+
+See [`COPYING`](https://github.com/willitmod/wim-solo-ckpool) in the upstream repo for the full license text.
+
+## How to use
+
+This image is designed to be pulled by the Ducky Pool installer:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ducksdev/ducky-installer/main/install.sh | sudo bash
+docker pull ghcr.io/ducksdev/ducky-pool-ckpool:0.8.3-rc1-590fb2a
 ```
 
-That's it. The installer:
+You can also run it standalone the same way you'd run the upstream image — same arguments, same config format, same socket layout. See [the upstream README](https://github.com/willitmod/wim-solo-ckpool) for runtime details.
 
-1. Installs Docker if you don't have it
-2. Drops the stack into `/opt/ducky-pool`
-3. Stores chain data and logs under `/var/lib/ducky-pool`
-4. Generates a strong random RPC password
-5. Builds the web + ckpool images
-6. Starts everything via Docker Compose
-7. Installs a systemd unit so it boots with the host
+## How this image is built
 
-When it finishes you'll see a URL for the dashboard and a stratum URL for miners.
+The [`Dockerfile`](./Dockerfile) is a few lines: it pulls the upstream image, adds OCI labels (title, source, license, lineage), and pushes the result to GHCR. The CI workflow at [`.github/workflows/publish-ckpool.yml`](../.github/workflows/publish-ckpool.yml) handles the build.
 
-## Requirements
+To publish a new version:
 
-- Ubuntu 24.04+ (or anything with apt + systemd)
-- ~300 GB free disk for the BCH chain
-- Open ports: `4567` (stratum), `4568` (web UI), `8333` (BCH p2p, optional)
-- Run as root or with `sudo`
+1. Update the upstream pin in [`Dockerfile`](./Dockerfile) (the `FROM` line)
+2. Push a git tag matching the upstream version: `git tag ckpool-v0.9.0-... && git push --tags`
+3. The CI workflow runs and publishes the new image to `ghcr.io/ducksdev/ducky-pool-ckpool:VERSION` and `:latest`
 
-## Use
+## Reporting issues
 
-After install, open `http://<your-host>:4568` and set a BCH payout address.
-Both legacy (`1...` / `3...`) and CashAddr (`q...` / `bitcoincash:q...`) are accepted.
+Bugs in the actual ckpool engine should go to [WillItMod's issue tracker](https://github.com/willitmod/wim-solo-ckpool/issues). Bugs in the Ducky Pool installer or dashboard go to [ducksdev/ducky-installer](https://github.com/ducksdev/ducky-installer/issues). Bugs specifically in how this image is packaged (labels, build pipeline) go here.
 
-Point miners at `stratum+tcp://<your-host>:4567`. Worker name doesn't matter
-(it's solo, the address is what counts). Password `x` is fine.
+## Contact
 
-The BCH node will sync first (~250 GB, hours-to-days). The dashboard shows
-progress.
-
-## Layout
-
-```
-/opt/ducky-pool/                      # config, compose file, build contexts
-├── docker-compose.yml                #   generated, contains RPC password
-└── services/
-    ├── web/                          #   Flask dashboard
-    └── ckpool/                       #   ckpool-solo, BCH-aware
-
-/var/lib/ducky-pool/                  # all persistent data
-├── bchnode/                          #   blockchain (~250 GB)
-├── ckpool/                           #   pool logs + status
-├── shared/                           #   payout address, exchanged web↔ckpool
-└── rpc.pass                          #   generated, do not delete
-```
-
-## Manage
-
-```bash
-sudo systemctl status ducky-pool
-sudo systemctl restart ducky-pool
-sudo systemctl stop ducky-pool
-
-# logs
-sudo docker logs -f ducky-bchnode
-sudo docker logs -f ducky-ckpool
-sudo docker logs -f ducky-web
-
-# update (re-run installer; safe and idempotent)
-curl -fsSL https://raw.githubusercontent.com/ducksdev/ducky-installer/main/install.sh | sudo bash
-```
-
-## Uninstall
-
-```bash
-sudo systemctl disable --now ducky-pool
-sudo rm /etc/systemd/system/ducky-pool.service
-sudo systemctl daemon-reload
-
-cd /opt/ducky-pool && sudo docker compose down -v
-sudo rm -rf /opt/ducky-pool
-
-# WARNING: this also deletes the synced chain. Only do it if you really mean it.
-sudo rm -rf /var/lib/ducky-pool
-```
-
-## Customising
-
-Override defaults with env vars before running the installer:
-
-```bash
-sudo STRATUM_PORT=3333 WEB_PORT=8080 BCHN_IMAGE=zquestz/bitcoin-cash-node:29.0.0 \
-    bash install.sh
-```
-
-| Variable      | Default                                  | Notes                                  |
-| ------------- | ---------------------------------------- | -------------------------------------- |
-| `INSTALL_DIR` | `/opt/ducky-pool`                        | Where compose + sources live           |
-| `DATA_DIR`    | `/var/lib/ducky-pool`                    | Where chain + logs live                |
-| `STRATUM_PORT`| `4567`                                   | Miner-facing stratum port              |
-| `WEB_PORT`    | `4568`                                   | Dashboard port                         |
-| `P2P_PORT`    | `8333`                                   | BCH p2p (set to `0` to disable inbound)|
-| `BCHN_IMAGE`  | `zquestz/bitcoin-cash-node:latest`       | Pin a specific tag for reproducibility |
-| `REPO_RAW`    | `https://raw.githubusercontent.com/...`  | Where the installer fetches sources    |
+ducksdev — see the [main installer repo](https://github.com/ducksdev/ducky-installer) for contact info.

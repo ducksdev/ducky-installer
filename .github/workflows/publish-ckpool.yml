@@ -1,0 +1,97 @@
+name: Publish ckpool image
+
+# Build and publish the Ducky Pool ckpool wrapper image to GHCR.
+#
+# Triggers:
+#   - workflow_dispatch  : run on demand from the Actions tab. Use this
+#                          for the FIRST publish, and any time you want
+#                          to rebuild without bumping a version.
+#   - tag push (ckpool-*): push a tag like `ckpool-v0.8.3-rc1-590fb2a`
+#                          to publish a specific version. The tag value
+#                          becomes the upstream version in the image.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: 'Version tag for the published image (e.g. 0.8.3-rc1-590fb2a). Defaults to value parsed from Dockerfile FROM line.'
+        required: false
+        type: string
+  push:
+    tags:
+      - 'ckpool-v*'
+
+env:
+  REGISTRY: ghcr.io
+  # Image name lives under the user/org that owns the repo. github.repository_owner
+  # is automatically the GitHub account or org that this workflow runs in.
+  IMAGE_NAME: ${{ github.repository_owner }}/ducky-pool-ckpool
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine version tag
+        id: version
+        run: |
+          # Priority: workflow_dispatch input > git tag > Dockerfile FROM line.
+          if [ -n "${{ github.event.inputs.version_tag }}" ]; then
+            VERSION="${{ github.event.inputs.version_tag }}"
+            echo "Source: workflow input"
+          elif [[ "${GITHUB_REF}" == refs/tags/ckpool-v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/ckpool-v}"
+            echo "Source: git tag"
+          else
+            # Parse 'FROM ghcr.io/.../...:VERSION' from the Dockerfile
+            VERSION=$(grep -m1 '^FROM ' ckpool/Dockerfile | sed 's/.*://')
+            echo "Source: Dockerfile FROM line"
+          fi
+          echo "Resolved version: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: ./ckpool
+          file: ./ckpool/Dockerfile
+          push: true
+          # Two tags: the explicit version (which install.sh pins to)
+          # and 'latest' (a convenience tag for browsers/users).
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          # Add labels at build time too so docker inspect shows them
+          # without depending on the LABEL directives in the Dockerfile
+          # (belt and braces).
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp || github.event.repository.updated_at }}
+
+      - name: Summary
+        run: |
+          echo "## Published" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Verify with: \`docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**First-time setup:** the package starts as private. Go to your GitHub profile → Packages → ducky-pool-ckpool → Package settings → Change visibility → Public, so installs can pull it without auth." >> $GITHUB_STEP_SUMMARY
